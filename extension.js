@@ -56,8 +56,14 @@ function createOrShowPanel(extensionPath, initialRequest = '') {
             case 'sendRequest':
                 await handleSendRequest(message, panel);
                 break;
-            case 'aiRequest':
-                await handleAIRequest(message, panel);
+            case 'llmCall':
+                await handleLLMCall(message, panel);
+                break;
+            case 'pluginCall':
+                await handlePluginCall(message, panel);
+                break;
+            case 'apiValidate':
+                await handleApiValidate(message, panel);
                 break;
             case 'log':
                 console.log('[Repeater]', message.text);
@@ -169,66 +175,222 @@ async function handleSendRequest(message, panel) {
     }
 }
 
-function handleAIRequest(message, panel) {
-    const { model, prompt } = message;
-    const payload = JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        stream: false,
-    });
-
-    return new Promise((resolve) => {
-        const req = http.request({
-            hostname: '127.0.0.1',
-            port: 11434,
-            path: '/api/chat',
+// Generic JSON-over-HTTP(S) POST helper, reused for Ollama / OpenAI-compatible /
+// Anthropic-shaped endpoints and plugin webhooks.
+function postJSON(urlStr, headers, payload, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(urlStr);
+        } catch (err) {
+            reject(new Error(`Invalid URL: ${urlStr}`));
+            return;
+        }
+        const isHttps = parsedUrl.protocol === 'https:';
+        const lib = isHttps ? https : http;
+        const body = JSON.stringify(payload);
+        const req = lib.request({
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (isHttps ? 443 : 80),
+            path: parsedUrl.pathname + parsedUrl.search,
             method: 'POST',
-            headers: {
+            headers: Object.assign({
                 'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(payload),
-            },
-            timeout: 120000,
+                'Content-Length': Buffer.byteLength(body),
+            }, headers || {}),
+            rejectUnauthorized: false,
+            timeout: timeoutMs || 120000,
         }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
-                if (res.statusCode !== 200) {
-                    panel.webview.postMessage({ type: 'aiResponse', data: { error: `Ollama returned HTTP ${res.statusCode}: ${data.slice(0, 300)}` } });
-                    resolve();
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 300)}`));
                     return;
                 }
                 try {
-                    const parsed = JSON.parse(data);
-                    const content = parsed && parsed.message && parsed.message.content;
-                    panel.webview.postMessage({
-                        type: 'aiResponse',
-                        data: {
-                            content: content || 'No response content returned.',
-                            promptTokens: parsed.prompt_eval_count,
-                            responseTokens: parsed.eval_count,
-                        }
-                    });
+                    resolve(JSON.parse(data));
                 } catch (err) {
-                    panel.webview.postMessage({ type: 'aiResponse', data: { error: `Could not parse Ollama response: ${err.message}` } });
+                    reject(new Error(`Could not parse response JSON: ${err.message}`));
                 }
-                resolve();
             });
         });
-        req.on('error', (err) => {
-            panel.webview.postMessage({
-                type: 'aiResponse',
-                data: { error: `Could not reach Ollama at localhost:11434 (${err.message}). Make sure Ollama is running and the model is loaded (ollama run ${model}).` }
-            });
-            resolve();
-        });
-        req.on('timeout', () => {
-            req.destroy();
-            panel.webview.postMessage({ type: 'aiResponse', data: { error: 'Ollama request timed out after 120s.' } });
-            resolve();
-        });
-        req.write(payload);
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+        req.write(body);
         req.end();
     });
+}
+
+// Normalizes a chat completion across providers into { content, toolCalls, promptTokens, responseTokens }.
+async function callLLM(messages, tools, apiConfig, localModel) {
+    if (!apiConfig) {
+        // Local Ollama
+        const data = await postJSON('http://127.0.0.1:11434/api/chat', {}, {
+            model: localModel || 'xenos',
+            messages,
+            tools: tools && tools.length ? tools : undefined,
+            stream: false,
+        }, 180000).catch(err => {
+            throw new Error(`Could not reach Ollama at localhost:11434 (${err.message}). Make sure Ollama is running and the model is loaded.`);
+        });
+        const msg = data.message || {};
+        return {
+            content: msg.content || '',
+            toolCalls: (msg.tool_calls || []).map(tc => ({
+                id: tc.id || `${Date.now()}`,
+                name: tc.function && tc.function.name,
+                arguments: tc.function && tc.function.arguments,
+            })),
+            promptTokens: data.prompt_eval_count,
+            responseTokens: data.eval_count,
+        };
+    }
+
+    if (apiConfig.kind === 'anthropic') {
+        const systemMsg = messages.find(m => m.role === 'system');
+        const rest = messages.filter(m => m.role !== 'system').map(m => ({
+            role: m.role === 'tool' ? 'user' : m.role,
+            content: m.role === 'tool'
+                ? [{ type: 'tool_result', tool_use_id: m.tool_call_id, content: m.content }]
+                : m.content,
+        }));
+        const data = await postJSON(
+            (apiConfig.baseUrl || 'https://api.anthropic.com').replace(/\/$/, '') + '/v1/messages',
+            { 'x-api-key': apiConfig.apiKey, 'anthropic-version': '2023-06-01' },
+            {
+                model: apiConfig.model,
+                max_tokens: 1536,
+                system: systemMsg ? systemMsg.content : undefined,
+                messages: rest,
+                tools: tools && tools.length ? tools.map(t => ({
+                    name: t.function.name,
+                    description: t.function.description,
+                    input_schema: t.function.parameters,
+                })) : undefined,
+            }
+        );
+        const content = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+        const toolCalls = (data.content || []).filter(b => b.type === 'tool_use').map(b => ({
+            id: b.id, name: b.name, arguments: JSON.stringify(b.input || {}),
+        }));
+        return {
+            content, toolCalls,
+            promptTokens: data.usage && data.usage.input_tokens,
+            responseTokens: data.usage && data.usage.output_tokens,
+        };
+    }
+
+    // OpenAI-compatible (default for any custom apiConfig without kind 'anthropic')
+    const data = await postJSON(
+        (apiConfig.baseUrl || '').replace(/\/$/, '') + '/chat/completions',
+        { Authorization: `Bearer ${apiConfig.apiKey}` },
+        { model: apiConfig.model, messages, tools: tools && tools.length ? tools : undefined }
+    );
+    const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
+    return {
+        content: msg.content || '',
+        toolCalls: (msg.tool_calls || []).map(tc => ({
+            id: tc.id, name: tc.function && tc.function.name, arguments: tc.function && tc.function.arguments,
+        })),
+        promptTokens: data.usage && data.usage.prompt_tokens,
+        responseTokens: data.usage && data.usage.completion_tokens,
+    };
+}
+
+async function handleLLMCall(message, panel) {
+    const { requestId, messages, tools, apiConfig, model } = message;
+    try {
+        const result = await callLLM(messages, tools, apiConfig, model);
+        panel.webview.postMessage({ type: 'llmResult', requestId, data: result });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'llmResult', requestId, data: { error: err.message } });
+    }
+}
+
+async function handlePluginCall(message, panel) {
+    const { requestId, url, args } = message;
+    try {
+        const data = await postJSON(url, {}, args || {}, 60000);
+        panel.webview.postMessage({ type: 'pluginResult', requestId, data: { result: data } });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'pluginResult', requestId, data: { error: err.message } });
+    }
+}
+
+// Known providers so /api only needs a name + key. "openrouter" alone covers most other
+// models too, since it proxies to nearly everything -- that's the practical answer to
+// "we want lots of providers" without a bespoke integration per one.
+const PROVIDER_PRESETS = {
+    openai: { kind: 'openai', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
+    anthropic: { kind: 'anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-5' },
+    claude: { kind: 'anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-5' },
+    openrouter: { kind: 'openai', baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openrouter/auto' },
+    groq: { kind: 'openai', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
+    mistral: { kind: 'openai', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'mistral-large-latest' },
+};
+function resolveProvider(name, baseUrlOverride) {
+    const key = String(name || '').toLowerCase().replace(/[^a-z]/g, '');
+    const preset = PROVIDER_PRESETS[key];
+    if (preset) return { kind: preset.kind, baseUrl: baseUrlOverride || preset.baseUrl, defaultModel: preset.defaultModel };
+    if (baseUrlOverride) return { kind: 'openai', baseUrl: baseUrlOverride, defaultModel: '' };
+    return null;
+}
+
+function getJSON(urlStr, headers, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        let parsedUrl;
+        try { parsedUrl = new URL(urlStr); } catch (err) { reject(new Error(`Invalid URL: ${urlStr}`)); return; }
+        const isHttps = parsedUrl.protocol === 'https:';
+        const lib = isHttps ? https : http;
+        const req = lib.request({
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (isHttps ? 443 : 80),
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: 'GET',
+            headers: headers || {},
+            rejectUnauthorized: false,
+            timeout: timeoutMs || 15000,
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`HTTP ${res.statusCode}`));
+                    return;
+                }
+                resolve(data);
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Timed out')); });
+        req.end();
+    });
+}
+
+async function handleApiValidate(message, panel) {
+    const { requestId, name, apiKey, baseUrl } = message;
+    const resolved = resolveProvider(name, baseUrl);
+    if (!resolved) {
+        panel.webview.postMessage({ type: 'apiValidateResult', requestId, data: { ok: false, message: `Unknown provider "${name}" -- add a base URL for a custom endpoint.` } });
+        return;
+    }
+    try {
+        if (resolved.kind === 'anthropic') {
+            await getJSON(resolved.baseUrl.replace(/\/$/, '') + '/v1/models', { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' });
+        } else {
+            await getJSON(resolved.baseUrl.replace(/\/$/, '') + '/models', { Authorization: `Bearer ${apiKey}` });
+        }
+        panel.webview.postMessage({
+            type: 'apiValidateResult', requestId,
+            data: { ok: true, message: `"${name}" -- key verified.`, kind: resolved.kind, baseUrl: resolved.baseUrl, defaultModel: resolved.defaultModel },
+        });
+    } catch (err) {
+        panel.webview.postMessage({
+            type: 'apiValidateResult', requestId,
+            data: { ok: false, message: `"${name}" -- could not verify (${err.message}). Saved anyway; double-check the key.`, kind: resolved.kind, baseUrl: resolved.baseUrl, defaultModel: resolved.defaultModel },
+        });
+    }
 }
 
 function deactivate() {}

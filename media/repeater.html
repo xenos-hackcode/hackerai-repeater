@@ -34,7 +34,7 @@
         svg { display: block; }
         .icon { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; flex-shrink: 0; }
 
-        .app { display: flex; flex-direction: column; height: 100vh; }
+        .app { display: flex; flex-direction: column; height: 100vh; position: relative; }
 
         /* Logo */
         .logo {
@@ -46,7 +46,10 @@
             position: relative;
             overflow: hidden;
             flex-shrink: 0;
+            cursor: default;
         }
+        .logo.back { cursor: pointer; }
+        .logo.back:hover { border-color: var(--accent); }
         .logo-x {
             font-weight: 700;
             font-size: 13px;
@@ -81,15 +84,7 @@
             flex-shrink: 0;
         }
         .topbar .title { font-weight: 600; font-size: 12px; letter-spacing: 0.3px; color: var(--fg); margin-right: 4px; }
-        .topbar label { color: var(--fg-dim); font-size: 11px; display: flex; align-items: center; gap: 4px; }
-        .topbar select {
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            color: var(--fg);
-            padding: 3px 8px;
-            font-size: 12px;
-            font-family: inherit;
-        }
+        .topbar .subtitle { font-size: 10px; color: var(--fg-dim); }
         .icon-btn {
             background: var(--bg-input);
             border: 1px solid var(--border);
@@ -101,8 +96,34 @@
             font-size: 11px;
         }
         .icon-btn:hover { color: var(--fg); border-color: var(--accent); }
-        .icon-btn.active { color: var(--neon); border-color: var(--neon); }
         .topbar .spacer { margin-left: auto; }
+        .mode-toggle {
+            display: flex;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .mode-btn {
+            background: var(--bg-input);
+            border: none;
+            color: var(--fg-dim);
+            padding: 4px 10px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .mode-btn:hover { color: var(--fg); }
+        .mode-btn.active { background: var(--neon); color: #06120c; font-weight: 600; }
+        .mode-btn.active[data-mode="agent"] { background: var(--glitch-red); color: #1a0006; }
+
+        select, .field-input {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 5px 8px;
+            font-size: 12px;
+            font-family: inherit;
+            border-radius: 3px;
+        }
 
         /* Chat view */
         .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -134,6 +155,23 @@
         .chip .chip-count { color: var(--fg-dim); font-size: 10px; }
 
         .note-row { color: var(--fg-dim); font-size: 11px; padding: 2px 2px; }
+        .step-row {
+            color: var(--fg-dim); font-size: 10.5px; padding: 3px 8px;
+            border-left: 2px solid var(--neon); background: rgba(0,255,156,0.04);
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        }
+        .msg-row { display: flex; }
+        .msg-row.user { justify-content: flex-end; }
+        .msg-bubble {
+            max-width: 85%;
+            padding: 7px 11px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg-row.user .msg-bubble { background: var(--accent); color: #fff; }
+        .msg-row.assistant .msg-bubble { background: var(--bg-panel); border: 1px solid var(--border); }
 
         .result-entry {
             border: 1px solid var(--border);
@@ -171,7 +209,7 @@
             border-bottom: 1px solid var(--border);
         }
         .command-item:last-child { border-bottom: none; }
-        .command-item:hover, .command-item.sel { background: var(--bg-input); }
+        .command-item:hover { background: var(--bg-input); }
         .command-item .cmd-name { color: var(--neon); font-weight: 600; }
         .command-item .cmd-desc { color: var(--fg-dim); }
 
@@ -211,7 +249,7 @@
         .round-btn.send:hover { filter: brightness(1.15); }
         .round-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        /* Builder bar (composing /url /headers /body) */
+        /* Builder bar (composing /url /headers /body /plugins /api) */
         .builder-bar {
             border-top: 1px solid var(--border);
             background: var(--bg-panel);
@@ -230,7 +268,7 @@
         .builder-tag button { background: none; border: none; color: var(--fg-dim); cursor: pointer; display: flex; }
         .builder-tag button:hover { color: var(--red); }
         .builder-row { display: flex; gap: 6px; align-items: center; }
-        .builder-row input, .builder-row textarea {
+        .builder-row input {
             flex: 1;
             background: var(--bg-input);
             border: 1px solid var(--border);
@@ -239,8 +277,8 @@
             font-size: 12px;
             font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
             border-radius: 3px;
+            min-width: 60px;
         }
-        .builder-row textarea { resize: vertical; min-height: 50px; }
         .builder-actions { display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end; }
         .text-btn {
             background: var(--bg-input);
@@ -255,8 +293,9 @@
         .text-btn:hover { border-color: var(--accent); }
         .text-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         .text-btn.primary:hover { filter: brightness(1.15); }
+        .text-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        /* Full-screen result view */
+        /* Full-screen views (results / tools) */
         .fullscreen-view {
             position: absolute; inset: 0;
             background: var(--bg);
@@ -293,86 +332,53 @@
             overflow-y: auto;
         }
 
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #444; }
-        ::-webkit-scrollbar-thumb:hover { background: #666; }
-
-        /* AI panel */
-        .ai-panel {
-            flex-shrink: 0;
-            height: 180px;
-            max-height: 40vh;
-            border-top: 1px solid var(--border);
-            background: var(--bg-panel);
-            display: flex;
-            flex-direction: column;
-        }
-        .ai-panel.collapsed { display: none; }
-        .ai-banner {
+        /* Tools view */
+        .tools-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+        .tools-section { display: flex; flex-direction: column; gap: 8px; }
+        .tools-section h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fg-dim); }
+        .tools-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .tools-row label { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+        .banner {
             display: flex; align-items: center; gap: 6px;
-            background: #3a2a10;
-            color: var(--yellow);
-            font-size: 10px;
-            line-height: 1.4;
-            padding: 4px 10px;
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
+            background: #3a2a10; color: var(--yellow);
+            font-size: 10px; line-height: 1.4; padding: 6px 8px; border-radius: 3px;
         }
-        .ai-gate {
-            padding: 10px 14px;
-            font-size: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .ai-gate label { display: flex; align-items: flex-start; gap: 6px; }
-        .ai-gate button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .ai-main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-        .ai-toolbar { display: flex; gap: 6px; padding: 4px 10px; flex-shrink: 0; align-items: center; }
-        .ai-toolbar select {
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            color: var(--fg);
-            font-size: 11px;
-            padding: 3px 6px;
-            margin-left: auto;
-        }
+        .gate { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+        .gate label { display: flex; align-items: flex-start; gap: 6px; }
         .ai-output {
-            flex: 1;
-            overflow: auto;
             padding: 8px 10px;
             font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
             font-size: 12px;
             white-space: pre-wrap;
             word-break: break-word;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            min-height: 60px;
         }
         .ai-output .ai-error { color: var(--red); }
         .ai-output .ai-loading { color: var(--fg-dim); }
-        .ai-tokens { padding: 3px 10px 6px; font-size: 10px; color: var(--fg-dim); flex-shrink: 0; }
+        .ai-tokens { font-size: 10px; color: var(--fg-dim); }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #444; }
+        ::-webkit-scrollbar-thumb:hover { background: #666; }
     </style>
 </head>
 <body>
     <div class="app">
         <div class="topbar">
-            <div class="logo" aria-hidden="true"><span class="logo-x">X</span></div>
+            <div class="logo" id="logo" aria-hidden="true"><span class="logo-x">X</span></div>
             <span class="title">HackerAI Repeater</span>
-            <label>Method
-                <select id="method">
-                    <option>GET</option>
-                    <option>POST</option>
-                    <option>PUT</option>
-                    <option>PATCH</option>
-                    <option>DELETE</option>
-                    <option>HEAD</option>
-                    <option>OPTIONS</option>
-                </select>
-            </label>
-            <label><input type="checkbox" id="followRedirects" checked> Follow redirects</label>
             <div class="spacer"></div>
-            <button class="icon-btn" id="aiToggleBtn" title="AI assistant">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="4"/></svg>
-                AI
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" id="askModeBtn" title="Ask: chat only, no autonomous actions">Ask</button>
+                <button class="mode-btn" id="agentModeBtn" data-mode="agent" title="Agent: AI can call tools and act on its own">Agent</button>
+            </div>
+            <button class="icon-btn" id="toolsToggleBtn" title="Tools">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a1.5 1.5 0 0 0 2 2l6-6a4 4 0 0 0 5.4-5.4l-2.1 2.1-2-2 2.1-2.1Z"/></svg>
+                Tools
             </button>
         </div>
 
@@ -384,12 +390,7 @@
             <div class="builder-bar" id="builderBar" hidden>
                 <div class="builder-label" id="builderLabel"></div>
                 <div class="builder-tags" id="builderTags"></div>
-                <div class="builder-row" id="builderRow">
-                    <input id="builderInput" placeholder="" spellcheck="false">
-                    <button class="round-btn" id="builderAddBtn" title="Add">
-                        <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                    </button>
-                </div>
+                <div class="builder-row" id="builderRow"></div>
                 <div class="builder-actions">
                     <button class="text-btn" id="builderCancelBtn">
                         <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -413,38 +414,49 @@
             </div>
         </div>
 
-        <div class="fullscreen-view hidden" id="fullscreenView">
-            <div class="fs-header">
-                <button class="round-btn" id="fsBackBtn" title="Back">
-                    <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                </button>
-                <span class="fs-title" id="fsTitle">Results</span>
-            </div>
+        <div class="fullscreen-view hidden" id="resultsView">
+            <div class="fs-header"><span class="fs-title" id="fsTitle">Results</span></div>
             <div class="fs-body" id="fsBody"></div>
         </div>
 
-        <div class="ai-panel collapsed" id="aiPanel">
-            <div class="ai-banner">
-                <svg class="icon" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
-                Authorized security testing only — review AI output before acting on it.
-            </div>
-            <div class="ai-gate" id="aiGate">
-                <label>
-                    <input type="checkbox" id="aiAuthCheckbox">
-                    <span>I confirm I am authorized to test the target(s) I use this assistant against, and I take responsibility for how I use its output.</span>
-                </label>
-                <button class="text-btn primary" id="aiEnableBtn" disabled style="align-self:flex-start">Enable AI Assistant</button>
-            </div>
-            <div class="ai-main" id="aiMain" style="display:none">
-                <div class="ai-toolbar">
-                    <button class="text-btn" id="aiSuggestBtn">Suggest payload for request</button>
-                    <button class="text-btn" id="aiAnalyzeBtn">Analyze last response</button>
-                    <select id="aiModel">
-                        <option value="xenos">xenos</option>
-                    </select>
+        <div class="fullscreen-view hidden" id="toolsView">
+            <div class="fs-header"><span class="fs-title">Tools</span></div>
+            <div class="tools-body">
+                <div class="tools-section">
+                    <h3>Request settings</h3>
+                    <div class="tools-row">
+                        <label>Method
+                            <select id="method">
+                                <option>GET</option><option>POST</option><option>PUT</option>
+                                <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+                            </select>
+                        </label>
+                        <label><input type="checkbox" id="followRedirects" checked> Follow redirects</label>
+                    </div>
                 </div>
-                <div class="ai-output" id="aiOutput">Ask for a payload suggestion or a response analysis above.</div>
-                <div class="ai-tokens" id="aiTokens"></div>
+
+                <div class="tools-section">
+                    <h3>AI assistant</h3>
+                    <div class="banner">
+                        <svg class="icon" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+                        Authorized security testing only — review AI output before acting on it.
+                    </div>
+                    <div class="gate" id="aiGate">
+                        <label>
+                            <input type="checkbox" id="aiAuthCheckbox">
+                            <span>I confirm I am authorized to test the target(s) I use this assistant against, and I take responsibility for how I use its output.</span>
+                        </label>
+                        <button class="text-btn primary" id="aiEnableBtn" disabled style="align-self:flex-start">Enable AI Assistant</button>
+                    </div>
+                    <div id="aiMain" style="display:none; flex-direction:column; gap:8px">
+                        <div class="tools-row">
+                            <button class="text-btn" id="aiSuggestBtn">Suggest payload for request</button>
+                            <button class="text-btn" id="aiAnalyzeBtn">Analyze last response</button>
+                        </div>
+                        <div class="ai-output" id="aiOutput">Ask for a payload suggestion or a response analysis, or just chat in the main view — the AI can drive /url, /headers, /body and sending on its own.</div>
+                        <div class="ai-tokens" id="aiTokens"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -453,35 +465,35 @@
         const vscode = acquireVsCodeApi();
 
         // ---------- DOM refs ----------
-        const methodEl = document.getElementById('method');
-        const followRedirects = document.getElementById('followRedirects');
+        const logo = document.getElementById('logo');
+        const toolsToggleBtn = document.getElementById('toolsToggleBtn');
+        const askModeBtn = document.getElementById('askModeBtn');
+        const agentModeBtn = document.getElementById('agentModeBtn');
         const chatLogEl = document.getElementById('chatLog');
         const commandMenu = document.getElementById('commandMenu');
         const builderBar = document.getElementById('builderBar');
         const builderLabel = document.getElementById('builderLabel');
         const builderTags = document.getElementById('builderTags');
-        const builderInput = document.getElementById('builderInput');
-        const builderAddBtn = document.getElementById('builderAddBtn');
+        const builderRow = document.getElementById('builderRow');
         const builderOkBtn = document.getElementById('builderOkBtn');
         const builderCancelBtn = document.getElementById('builderCancelBtn');
         const inputBar = document.getElementById('inputBar');
         const chatInput = document.getElementById('chatInput');
         const plusBtn = document.getElementById('plusBtn');
         const sendBtn = document.getElementById('sendBtn');
-        const fullscreenView = document.getElementById('fullscreenView');
-        const fsBackBtn = document.getElementById('fsBackBtn');
+        const resultsView = document.getElementById('resultsView');
+        const toolsView = document.getElementById('toolsView');
         const fsTitle = document.getElementById('fsTitle');
         const fsBody = document.getElementById('fsBody');
+        const methodEl = document.getElementById('method');
+        const followRedirects = document.getElementById('followRedirects');
 
-        const aiToggleBtn = document.getElementById('aiToggleBtn');
-        const aiPanel = document.getElementById('aiPanel');
         const aiGate = document.getElementById('aiGate');
         const aiAuthCheckbox = document.getElementById('aiAuthCheckbox');
         const aiEnableBtn = document.getElementById('aiEnableBtn');
         const aiMain = document.getElementById('aiMain');
         const aiSuggestBtn = document.getElementById('aiSuggestBtn');
         const aiAnalyzeBtn = document.getElementById('aiAnalyzeBtn');
-        const aiModel = document.getElementById('aiModel');
         const aiOutput = document.getElementById('aiOutput');
         const aiTokens = document.getElementById('aiTokens');
 
@@ -491,58 +503,100 @@
             { name: 'url', desc: 'Add one or more target URLs' },
             { name: 'headers', desc: 'Add request headers' },
             { name: 'body', desc: 'Set the request body' },
+            { name: 'output', desc: 'Toggle the AI step-by-step log' },
+            { name: 'plugins', desc: 'Link external tool plugins' },
+            { name: 'api', desc: 'Connect Claude or another AI/API' },
         ];
+        const BUILDER_META = {
+            url: { label: 'Add target URL(s)', placeholder: 'https://example.com/api/endpoint' },
+            headers: { label: 'Add header(s)', placeholder: 'Header-Name: value' },
+            body: { label: 'Set body', placeholder: 'Request body content' },
+            plugins: { label: 'Add plugin(s)', fields: [
+                { key: 'name', placeholder: 'Plugin name' },
+                { key: 'url', placeholder: 'https://your-plugin-endpoint' },
+            ] },
+            api: { label: 'Connect an API (name + key -- verified automatically; only the first entry is used)', fields: [
+                { key: 'name', placeholder: 'openai / claude / openrouter / groq / mistral / ...' },
+                { key: 'apiKey', placeholder: 'API key' },
+                { key: 'baseUrl', placeholder: 'Base URL (only for a custom/unknown provider)' },
+                { key: 'model', placeholder: 'Model override (optional)' },
+            ] },
+        };
 
         function loadState() {
             try {
                 const raw = localStorage.getItem(STORE_KEY);
                 if (raw) return JSON.parse(raw);
             } catch {}
-            return { chatLog: [], versionCounters: { url: 0, headers: 0, body: 0 }, activeChipId: { url: null, headers: null, body: null } };
+            return {
+                chatLog: [],
+                versionCounters: { url: 0, headers: 0, body: 0, plugins: 0, api: 0 },
+                activeChipId: { url: null, headers: null, body: null, plugins: null, api: null },
+                showOutput: false,
+                mode: 'ask',
+                agentHistory: [{
+                    role: 'system',
+                    content: 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
+                        'You can call tools to set the target URL(s), headers, body, and to send the currently configured HTTP request. ' +
+                        'Only act on targets the user has authorized. Keep replies concise.',
+                }],
+            };
         }
         const state = loadState();
-        let lastResponseForAI = null; // {statusCode, statusMessage, headers, body}
-        let pendingRequests = {}; // requestId -> { entryId, index }
+        if (!state.mode) state.mode = 'ask';
+        if (!state.activeChipId.plugins) state.activeChipId.plugins = state.activeChipId.plugins || null;
+        if (!state.activeChipId.api) state.activeChipId.api = state.activeChipId.api || null;
+        if (state.versionCounters.plugins == null) state.versionCounters.plugins = 0;
+        if (state.versionCounters.api == null) state.versionCounters.api = 0;
+        let lastResponseForAI = null;
+        let pendingRequests = {};   // requestId -> { entryId, index }
+        let entryResolvers = {};   // entryId -> resolve callback (used by the agent's send_request tool)
+        let llmPending = {};       // requestId -> resolve
+        let pluginPending = {};    // requestId -> resolve
+        let apiValidatePending = {}; // requestId -> resolve
 
-        function saveState() {
-            localStorage.setItem(STORE_KEY, JSON.stringify(state));
-        }
-
-        function uid() {
-            return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        }
-
-        // ---------- Icons ----------
-        function chevron() {
-            return '<svg class="icon" viewBox="0 0 24 24" style="width:11px;height:11px"><path d="m9 18 6-6-6-6"/></svg>';
-        }
+        function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+        function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+        function slug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'plugin'; }
+        function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
         // ---------- Rendering ----------
-        function findChip(id) {
-            return state.chatLog.find(e => e.id === id && e.kind === 'chip');
+        function findChip(id) { return state.chatLog.find(e => e.id === id && e.kind === 'chip'); }
+
+        function tagLabel(type, item) {
+            if (typeof item === 'string') return item;
+            if (type === 'plugins') return item.name || item.url || 'plugin';
+            if (type === 'api') return item.name || 'API';
+            return JSON.stringify(item);
         }
 
         function renderChatLog() {
             chatLogEl.innerHTML = '';
-            if (state.chatLog.length === 0) {
+            const visible = state.chatLog.filter(e => e.kind !== 'step' || state.showOutput);
+            if (visible.length === 0) {
                 const empty = document.createElement('div');
                 empty.className = 'chat-empty';
-                empty.textContent = 'Type / to add a URL, headers, or body — then @ or the send button to fire the request.';
+                empty.textContent = 'Chat with the AI, or type / to add a URL, headers, body, plugins, or an API — then @ or the send button to fire the request.';
                 chatLogEl.appendChild(empty);
             }
-            state.chatLog.forEach(entry => {
-                if (entry.kind === 'chip') {
-                    chatLogEl.appendChild(renderChip(entry));
-                } else if (entry.kind === 'note') {
-                    const div = document.createElement('div');
-                    div.className = 'note-row';
-                    div.textContent = entry.text;
-                    chatLogEl.appendChild(div);
-                } else if (entry.kind === 'result') {
-                    chatLogEl.appendChild(renderResultEntry(entry));
-                }
+            visible.forEach(entry => {
+                if (entry.kind === 'chip') chatLogEl.appendChild(renderChip(entry));
+                else if (entry.kind === 'note') { const d = document.createElement('div'); d.className = 'note-row'; d.textContent = entry.text; chatLogEl.appendChild(d); }
+                else if (entry.kind === 'step') { const d = document.createElement('div'); d.className = 'step-row'; d.textContent = entry.text; chatLogEl.appendChild(d); }
+                else if (entry.kind === 'result') chatLogEl.appendChild(renderResultEntry(entry));
+                else if (entry.kind === 'user' || entry.kind === 'assistant') chatLogEl.appendChild(renderMsg(entry));
             });
             chatLogEl.scrollTop = chatLogEl.scrollHeight;
+        }
+
+        function renderMsg(entry) {
+            const row = document.createElement('div');
+            row.className = 'msg-row ' + entry.kind;
+            const bubble = document.createElement('div');
+            bubble.className = 'msg-bubble';
+            bubble.textContent = entry.text;
+            row.appendChild(bubble);
+            return row;
         }
 
         function renderChip(entry) {
@@ -581,8 +635,66 @@
             });
             div.appendChild(title);
             div.appendChild(summary);
-            div.addEventListener('click', () => openFullscreen(entry));
+            div.addEventListener('click', () => openResultsView(entry));
             return div;
+        }
+
+        // ---------- Navigation (logo = back) ----------
+        function anyFullscreenOpen() {
+            return !resultsView.classList.contains('hidden') || !toolsView.classList.contains('hidden');
+        }
+        function closeFullscreens() {
+            resultsView.classList.add('hidden');
+            toolsView.classList.add('hidden');
+            logo.classList.remove('back');
+        }
+        function openResultsView(entry) {
+            toolsView.classList.add('hidden');
+            fsTitle.textContent = `${entry.method} · ${entry.items.length} request${entry.items.length === 1 ? '' : 's'}`;
+            fsBody.innerHTML = '';
+            entry.items.forEach(item => fsBody.appendChild(renderFsItem(entry.method, item)));
+            resultsView.classList.remove('hidden');
+            logo.classList.add('back');
+        }
+        function openToolsView() {
+            resultsView.classList.add('hidden');
+            toolsView.classList.remove('hidden');
+            logo.classList.add('back');
+        }
+        logo.addEventListener('click', () => { if (anyFullscreenOpen()) closeFullscreens(); });
+        toolsToggleBtn.addEventListener('click', openToolsView);
+
+        function renderFsItem(method, item) {
+            const wrap = document.createElement('div');
+            wrap.className = 'fs-item';
+            const head = document.createElement('div');
+            head.className = 'fs-item-head';
+            if (item.pending) {
+                head.innerHTML = `<span class="method">${method}</span><span class="url">${item.url}</span><span class="status-pending">pending…</span>`;
+            } else if (item.error) {
+                head.innerHTML = `<span class="method">${method}</span><span class="url">${item.url}</span><span class="status-err">${escapeHtml(item.error)}</span>`;
+            } else {
+                const cls = statusClass(item);
+                head.innerHTML = `<span class="method">${method}</span><span class="url">${item.url}</span>` +
+                    `<span class="${cls}">${item.statusCode} ${item.statusMessage || ''}</span>` +
+                    `<span style="color:var(--fg-dim)">${item.timing || 0}ms</span>` +
+                    `<span style="color:var(--fg-dim)">${(item.body || '').length} bytes</span>`;
+            }
+            wrap.appendChild(head);
+            if (!item.pending && !item.error) {
+                const reqSection = document.createElement('details');
+                reqSection.className = 'fs-section';
+                reqSection.innerHTML = `<summary>Response headers</summary><pre>${escapeHtml(JSON.stringify(item.headers || {}, null, 2))}</pre>`;
+                wrap.appendChild(reqSection);
+                const bodySection = document.createElement('details');
+                bodySection.className = 'fs-section';
+                bodySection.open = true;
+                let bodyText = item.body || '';
+                try { bodyText = JSON.stringify(JSON.parse(bodyText), null, 2); } catch {}
+                bodySection.innerHTML = `<summary>Response body</summary><pre>${escapeHtml(bodyText)}</pre>`;
+                wrap.appendChild(bodySection);
+            }
+            return wrap;
         }
 
         // ---------- Command menu ----------
@@ -594,28 +706,26 @@
                 const item = document.createElement('div');
                 item.className = 'command-item';
                 item.innerHTML = `<span class="cmd-name">/${c.name}</span><span class="cmd-desc">${c.desc}</span>`;
-                item.addEventListener('click', () => {
-                    chatInput.value = '';
-                    hideCommandMenu();
-                    openBuilder(c.name, null);
-                });
+                item.addEventListener('click', () => { chatInput.value = ''; hideCommandMenu(); runCommand(c.name); });
                 commandMenu.appendChild(item);
             });
             commandMenu.hidden = false;
         }
-        function hideCommandMenu() {
-            commandMenu.hidden = true;
-            commandMenu.innerHTML = '';
+        function hideCommandMenu() { commandMenu.hidden = true; commandMenu.innerHTML = ''; }
+
+        function runCommand(name) {
+            if (name === 'output') {
+                state.showOutput = !state.showOutput;
+                saveState();
+                renderChatLog();
+                return;
+            }
+            openBuilder(name, null);
         }
 
-        // ---------- Builder (compose /url /headers /body) ----------
+        // ---------- Builder (compose /url /headers /body /plugins /api) ----------
         let builder = null; // { type, chipId, items }
-
-        const BUILDER_META = {
-            url: { label: 'Add target URL(s)', placeholder: 'https://example.com/api/endpoint' },
-            headers: { label: 'Add header(s)', placeholder: 'Header-Name: value' },
-            body: { label: 'Set body', placeholder: 'Request body content' },
-        };
+        let builderInputs = []; // live DOM input refs for the current row
 
         function openBuilder(type, chipId) {
             let items = [];
@@ -625,15 +735,12 @@
             }
             builder = { type, chipId, items };
             builderLabel.textContent = BUILDER_META[type].label + (chipId ? ` (editing v${findChip(chipId).version})` : '');
-            builderInput.placeholder = BUILDER_META[type].placeholder;
-            builderInput.value = '';
             renderBuilderTags();
+            renderBuilderRow();
             inputBar.hidden = true;
             hideCommandMenu();
             builderBar.hidden = false;
-            builderInput.focus();
         }
-
         function closeBuilder() {
             builder = null;
             builderBar.hidden = true;
@@ -641,201 +748,213 @@
             chatInput.value = '';
             chatInput.focus();
         }
-
         function renderBuilderTags() {
             builderTags.innerHTML = '';
             builder.items.forEach((val, idx) => {
                 const tag = document.createElement('div');
                 tag.className = 'builder-tag';
                 const span = document.createElement('span');
-                span.textContent = val;
+                span.textContent = tagLabel(builder.type, val);
                 const btn = document.createElement('button');
                 btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" style="width:11px;height:11px"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-                btn.addEventListener('click', () => {
-                    builder.items.splice(idx, 1);
-                    renderBuilderTags();
-                });
-                tag.appendChild(span);
-                tag.appendChild(btn);
+                btn.addEventListener('click', () => { builder.items.splice(idx, 1); renderBuilderTags(); });
+                tag.appendChild(span); tag.appendChild(btn);
                 builderTags.appendChild(tag);
             });
         }
-
-        function builderAddCurrent() {
-            const val = builderInput.value.trim();
-            if (!val) return;
-            builder.items.push(val);
-            builderInput.value = '';
-            renderBuilderTags();
-            builderInput.focus();
+        function renderBuilderRow() {
+            const meta = BUILDER_META[builder.type];
+            builderRow.innerHTML = '';
+            builderInputs = [];
+            const specs = meta.fields || [{ key: 'value', placeholder: meta.placeholder }];
+            specs.forEach((f, i) => {
+                const inp = document.createElement('input');
+                inp.placeholder = f.placeholder;
+                inp.spellcheck = false;
+                inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); builderAddCurrent(); } });
+                builderInputs.push(inp);
+                builderRow.appendChild(inp);
+            });
+            const addBtn = document.createElement('button');
+            addBtn.className = 'round-btn'; addBtn.title = 'Add';
+            addBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>';
+            addBtn.addEventListener('click', builderAddCurrent);
+            builderRow.appendChild(addBtn);
+            if (builderInputs[0]) builderInputs[0].focus();
         }
-
-        builderAddBtn.addEventListener('click', builderAddCurrent);
-        builderInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); builderAddCurrent(); }
-        });
-
+        function builderAddCurrent() {
+            const meta = BUILDER_META[builder.type];
+            if (meta.fields) {
+                const obj = {};
+                meta.fields.forEach((f, i) => { obj[f.key] = (builderInputs[i].value || '').trim(); });
+                if (!Object.values(obj).some(v => v)) return;
+                builder.items.push(obj);
+            } else {
+                const val = (builderInputs[0].value || '').trim();
+                if (!val) return;
+                builder.items.push(val);
+            }
+            renderBuilderTags();
+            renderBuilderRow();
+        }
         builderCancelBtn.addEventListener('click', closeBuilder);
+        function validateApiConfig(item) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                apiValidatePending[requestId] = resolve;
+                vscode.postMessage({ type: 'apiValidate', requestId, name: item.name, apiKey: item.apiKey, baseUrl: item.baseUrl });
+            });
+        }
 
         builderOkBtn.addEventListener('click', () => {
             if (!builder) return;
-            if (builderInput.value.trim()) builderAddCurrent();
+            builderAddCurrent();
             const { type, chipId, items } = builder;
+            let chip;
             if (chipId) {
-                const chip = findChip(chipId);
+                chip = findChip(chipId);
                 chip.items = items;
             } else {
                 state.versionCounters[type] += 1;
-                const entry = { id: uid(), kind: 'chip', type, version: state.versionCounters[type], items };
-                state.chatLog.push(entry);
-                state.activeChipId[type] = entry.id;
+                chip = { id: uid(), kind: 'chip', type, version: state.versionCounters[type], items };
+                state.chatLog.push(chip);
+                state.activeChipId[type] = chip.id;
             }
             saveState();
             renderChatLog();
             closeBuilder();
+
+            if (type === 'api' && chip.items[0] && chip.items[0].name) {
+                const item = chip.items[0];
+                logStep(`Verifying API "${item.name}"…`);
+                validateApiConfig(item).then(res => {
+                    item.kind = res.kind || item.kind;
+                    item.baseUrl = item.baseUrl || res.baseUrl;
+                    item.model = item.model || res.defaultModel;
+                    logStep(res.message);
+                    saveState();
+                    renderChatLog();
+                });
+            }
         });
 
-        // ---------- Chat input: '/' menu, '@' send ----------
+        // ---------- Chat input: '/' menu, '@' send, plain text = chat with AI ----------
         chatInput.addEventListener('input', () => {
             const val = chatInput.value;
-            if (val.startsWith('/')) {
-                showCommandMenu(val.slice(1).toLowerCase());
-            } else {
-                hideCommandMenu();
-            }
-            if (val === '@') {
-                chatInput.value = '';
-                hideCommandMenu();
-                sendBatch();
-            }
+            if (val.startsWith('/')) showCommandMenu(val.slice(1).toLowerCase());
+            else hideCommandMenu();
+            if (val === '@') { chatInput.value = ''; hideCommandMenu(); sendBatch(); }
         });
         chatInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const val = chatInput.value.trim();
-                if (!val) return;
-                if (val.startsWith('/')) {
-                    const name = val.slice(1).toLowerCase();
-                    if (COMMANDS.some(c => c.name === name)) {
-                        chatInput.value = '';
-                        hideCommandMenu();
-                        openBuilder(name, null);
-                        return;
-                    }
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const val = chatInput.value.trim();
+            if (!val) return;
+            if (val.startsWith('/')) {
+                const name = val.slice(1).toLowerCase();
+                if (COMMANDS.some(c => c.name === name)) {
+                    chatInput.value = ''; hideCommandMenu(); runCommand(name);
+                    return;
                 }
-                // Plain text note, kept for context in the log
-                state.chatLog.push({ id: uid(), kind: 'note', text: val });
-                saveState();
-                renderChatLog();
-                chatInput.value = '';
-                hideCommandMenu();
             }
+            chatInput.value = ''; hideCommandMenu();
+            if (val === '@') { sendBatch(); return; }
+            if (state.mode === 'agent') runAgent(val); else runAsk(val);
         });
-        plusBtn.addEventListener('click', () => {
-            chatInput.value = '/';
-            showCommandMenu('');
-            chatInput.focus();
-        });
-        sendBtn.addEventListener('click', () => {
-            chatInput.value = '';
-            hideCommandMenu();
-            sendBatch();
-        });
+        plusBtn.addEventListener('click', () => { chatInput.value = '/'; showCommandMenu(''); chatInput.focus(); });
+        sendBtn.addEventListener('click', () => { chatInput.value = ''; hideCommandMenu(); sendBatch(); });
 
-        // ---------- Sending ----------
-        function sendBatch() {
+        // ---------- Ask/Agent mode ----------
+        function renderMode() {
+            askModeBtn.classList.toggle('active', state.mode === 'ask');
+            agentModeBtn.classList.toggle('active', state.mode === 'agent');
+        }
+        askModeBtn.addEventListener('click', () => { state.mode = 'ask'; saveState(); renderMode(); });
+        agentModeBtn.addEventListener('click', () => {
+            if (!aiIsAuthorized()) {
+                state.chatLog.push({ id: uid(), kind: 'note', text: 'Enable the AI assistant in Tools first, then switch to Agent mode.' });
+                saveState(); renderChatLog();
+                return;
+            }
+            state.mode = 'agent'; saveState(); renderMode();
+        });
+        renderMode();
+
+        async function runAsk(userText) {
+            addChatEntry({ kind: 'user', text: userText });
+            state.agentHistory.push({ role: 'user', content: userText });
+            if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
+            logStep('Thinking… (Ask mode — no tool calls, can take a while on CPU)');
+            const result = await callLLMAsync(state.agentHistory, []);
+            if (result.error) {
+                addChatEntry({ kind: 'assistant', text: 'Error: ' + result.error });
+                return;
+            }
+            state.agentHistory.push({ role: 'assistant', content: result.content || '' });
+            addChatEntry({ kind: 'assistant', text: result.content || '(no response)' });
+            if (result.promptTokens != null || result.responseTokens != null) {
+                logStep(`${(result.promptTokens || 0) + (result.responseTokens || 0)} tokens used`);
+            }
+            saveState();
+        }
+
+        // ---------- Direct sending (manual @ / send button) ----------
+        function sendBatch(methodOverride) {
             const urlChipId = state.activeChipId.url;
             const urlChip = urlChipId ? findChip(urlChipId) : null;
             const urls = urlChip ? urlChip.items : [];
             if (urls.length === 0) {
                 state.chatLog.push({ id: uid(), kind: 'note', text: 'No URL set — use /url first.' });
-                saveState();
-                renderChatLog();
+                saveState(); renderChatLog();
                 return;
             }
             const headersChip = state.activeChipId.headers ? findChip(state.activeChipId.headers) : null;
             const bodyChip = state.activeChipId.body ? findChip(state.activeChipId.body) : null;
             const headersText = headersChip ? headersChip.items.join('\n') : '';
             const bodyText = bodyChip ? bodyChip.items.join('\n') : '';
-            const method = methodEl.value;
-
-            const entry = {
-                id: uid(),
-                kind: 'result',
-                method,
-                items: urls.map(u => ({ url: u, pending: true, requestId: uid() })),
-            };
+            const method = methodOverride || methodEl.value;
+            const entry = { id: uid(), kind: 'result', method, items: urls.map(u => ({ url: u, pending: true, requestId: uid() })) };
             state.chatLog.push(entry);
-            saveState();
-            renderChatLog();
-
+            saveState(); renderChatLog();
             entry.items.forEach((item, index) => {
                 pendingRequests[item.requestId] = { entryId: entry.id, index };
-                vscode.postMessage({
-                    type: 'sendRequest',
-                    requestId: item.requestId,
-                    method,
-                    url: item.url,
-                    headers: headersText,
-                    body: bodyText,
-                    followRedirects: followRedirects.checked,
+                vscode.postMessage({ type: 'sendRequest', requestId: item.requestId, method, url: item.url, headers: headersText, body: bodyText, followRedirects: followRedirects.checked });
+            });
+        }
+
+        // Awaitable variant used by the agent's send_request tool.
+        function sendBatchAwait(methodOverride) {
+            return new Promise((resolve) => {
+                const urlChipId = state.activeChipId.url;
+                const urlChip = urlChipId ? findChip(urlChipId) : null;
+                const urls = urlChip ? urlChip.items : [];
+                if (urls.length === 0) { resolve({ error: 'No URL set — use /url or the set_url tool first.' }); return; }
+                const headersChip = state.activeChipId.headers ? findChip(state.activeChipId.headers) : null;
+                const bodyChip = state.activeChipId.body ? findChip(state.activeChipId.body) : null;
+                const headersText = headersChip ? headersChip.items.join('\n') : '';
+                const bodyText = bodyChip ? bodyChip.items.join('\n') : '';
+                const method = methodOverride || methodEl.value;
+                const entry = { id: uid(), kind: 'result', method, items: urls.map(u => ({ url: u, pending: true, requestId: uid() })) };
+                state.chatLog.push(entry);
+                saveState(); renderChatLog();
+                let remaining = entry.items.length;
+                entryResolvers[entry.id] = () => {
+                    remaining--;
+                    if (remaining <= 0) {
+                        delete entryResolvers[entry.id];
+                        resolve({ requests: entry.items.map(i => i.error ? { url: i.url, error: i.error } : { url: i.url, statusCode: i.statusCode, bytes: (i.body || '').length }) });
+                    }
+                };
+                entry.items.forEach((item, index) => {
+                    pendingRequests[item.requestId] = { entryId: entry.id, index };
+                    vscode.postMessage({ type: 'sendRequest', requestId: item.requestId, method, url: item.url, headers: headersText, body: bodyText, followRedirects: followRedirects.checked });
                 });
             });
         }
 
-        // ---------- Full-screen results ----------
-        function openFullscreen(entry) {
-            fsTitle.textContent = `${entry.method} · ${entry.items.length} request${entry.items.length === 1 ? '' : 's'}`;
-            fsBody.innerHTML = '';
-            entry.items.forEach(item => {
-                fsBody.appendChild(renderFsItem(entry.method, item));
-            });
-            fullscreenView.classList.remove('hidden');
-        }
-        function renderFsItem(method, item) {
-            const wrap = document.createElement('div');
-            wrap.className = 'fs-item';
-
-            const head = document.createElement('div');
-            head.className = 'fs-item-head';
-            if (item.pending) {
-                head.innerHTML = `<span class="method">${method}</span><span class="url">${item.url}</span><span class="status-pending">pending…</span>`;
-            } else if (item.error) {
-                head.innerHTML = `<span class="method">${method}</span><span class="url">${item.url}</span><span class="status-err">${item.error}</span>`;
-            } else {
-                const cls = statusClass(item);
-                head.innerHTML = `<span class="method">${method}</span><span class="url">${item.url}</span>` +
-                    `<span class="${cls}">${item.statusCode} ${item.statusMessage || ''}</span>` +
-                    `<span style="color:var(--fg-dim)">${item.timing || 0}ms</span>` +
-                    `<span style="color:var(--fg-dim)">${(item.body || '').length} bytes</span>`;
-            }
-            wrap.appendChild(head);
-
-            if (!item.pending && !item.error) {
-                const reqSection = document.createElement('details');
-                reqSection.className = 'fs-section';
-                reqSection.innerHTML = `<summary>Response headers</summary><pre>${escapeHtml(JSON.stringify(item.headers || {}, null, 2))}</pre>`;
-                wrap.appendChild(reqSection);
-
-                const bodySection = document.createElement('details');
-                bodySection.className = 'fs-section';
-                bodySection.open = true;
-                let bodyText = item.body || '';
-                try { bodyText = JSON.stringify(JSON.parse(bodyText), null, 2); } catch {}
-                bodySection.innerHTML = `<summary>Response body</summary><pre>${escapeHtml(bodyText)}</pre>`;
-                wrap.appendChild(bodySection);
-            }
-            return wrap;
-        }
-        function escapeHtml(s) {
-            return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-        }
-        fsBackBtn.addEventListener('click', () => fullscreenView.classList.add('hidden'));
-
         // ---------- Messages from extension ----------
         window.addEventListener('message', (event) => {
             const msg = event.data;
-
             if (msg.type === 'response') {
                 const pending = pendingRequests[msg.requestId];
                 if (!pending) return;
@@ -844,33 +963,23 @@
                 if (!entry) return;
                 const item = entry.items[pending.index];
                 item.pending = false;
-                if (msg.data.error) {
-                    item.error = msg.data.error;
-                } else {
-                    Object.assign(item, msg.data);
-                    lastResponseForAI = msg.data;
-                }
-                saveState();
-                renderChatLog();
-                if (!fullscreenView.classList.contains('hidden') && fsTitle.textContent.startsWith(entry.method)) {
-                    openFullscreen(entry);
-                }
+                if (msg.data.error) item.error = msg.data.error;
+                else { Object.assign(item, msg.data); lastResponseForAI = msg.data; }
+                saveState(); renderChatLog();
+                if (!resultsView.classList.contains('hidden') && fsTitle.textContent.startsWith(entry.method)) openResultsView(entry);
+                if (entryResolvers[entry.id]) entryResolvers[entry.id]();
 
-            } else if (msg.type === 'aiResponse') {
-                aiSuggestBtn.disabled = false;
-                aiAnalyzeBtn.disabled = false;
-                if (msg.data.error) {
-                    aiOutput.innerHTML = `<span class="ai-error">${msg.data.error}</span>`;
-                    aiTokens.textContent = '';
-                } else {
-                    aiOutput.textContent = msg.data.content;
-                    if (msg.data.promptTokens != null || msg.data.responseTokens != null) {
-                        const total = (msg.data.promptTokens || 0) + (msg.data.responseTokens || 0);
-                        aiTokens.textContent = `${total} tokens (${msg.data.promptTokens || 0} prompt + ${msg.data.responseTokens || 0} response)`;
-                    } else {
-                        aiTokens.textContent = '';
-                    }
-                }
+            } else if (msg.type === 'llmResult') {
+                const resolve = llmPending[msg.requestId];
+                if (resolve) { delete llmPending[msg.requestId]; resolve(msg.data); }
+
+            } else if (msg.type === 'pluginResult') {
+                const resolve = pluginPending[msg.requestId];
+                if (resolve) { delete pluginPending[msg.requestId]; resolve(msg.data); }
+
+            } else if (msg.type === 'apiValidateResult') {
+                const resolve = apiValidatePending[msg.requestId];
+                if (resolve) { delete apiValidatePending[msg.requestId]; resolve(msg.data); }
 
             } else if (msg.type === 'loadRequest') {
                 loadRawRequest(msg.data);
@@ -889,95 +998,183 @@
                     if (lines[i].trim() === '') { inBody = true; continue; }
                     if (inBody) bodyLines.push(lines[i]); else headerLines.push(lines[i]);
                 }
-            } else {
-                url = raw.trim();
-            }
+            } else { url = raw.trim(); }
             methodEl.value = method;
             if (url) {
                 state.versionCounters.url += 1;
                 const entry = { id: uid(), kind: 'chip', type: 'url', version: state.versionCounters.url, items: [url] };
-                state.chatLog.push(entry);
-                state.activeChipId.url = entry.id;
+                state.chatLog.push(entry); state.activeChipId.url = entry.id;
             }
             if (headerLines.length) {
                 state.versionCounters.headers += 1;
                 const entry = { id: uid(), kind: 'chip', type: 'headers', version: state.versionCounters.headers, items: headerLines };
-                state.chatLog.push(entry);
-                state.activeChipId.headers = entry.id;
+                state.chatLog.push(entry); state.activeChipId.headers = entry.id;
             }
             if (bodyLines.length) {
                 state.versionCounters.body += 1;
                 const entry = { id: uid(), kind: 'chip', type: 'body', version: state.versionCounters.body, items: [bodyLines.join('\n')] };
-                state.chatLog.push(entry);
-                state.activeChipId.body = entry.id;
+                state.chatLog.push(entry); state.activeChipId.body = entry.id;
             }
-            saveState();
-            renderChatLog();
+            saveState(); renderChatLog();
         }
 
-        // ---------- AI assistant ----------
-        // Routed through the extension host (Node), not fetch() from the webview --
-        // VS Code's webview sandbox blocks direct network calls regardless of CSP.
+        // ---------- LLM plumbing (local Ollama, or a connected /api) ----------
+        function getActiveApiConfig() {
+            const chip = state.activeChipId.api ? findChip(state.activeChipId.api) : null;
+            if (!chip || !chip.items.length) return null;
+            const item = chip.items[0];
+            if (!item.baseUrl || !item.apiKey) return null;
+            return { kind: item.kind === 'anthropic' ? 'anthropic' : 'openai', baseUrl: item.baseUrl, apiKey: item.apiKey, model: item.model };
+        }
+        function callLLMAsync(messages, tools) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                llmPending[requestId] = resolve;
+                vscode.postMessage({ type: 'llmCall', requestId, messages, tools, apiConfig: getActiveApiConfig(), model: 'xenos' });
+            });
+        }
+        function callPluginAsync(url, args) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                pluginPending[requestId] = resolve;
+                vscode.postMessage({ type: 'pluginCall', requestId, url, args });
+            });
+        }
+
+        // ---------- Agent: tools + loop ----------
+        function builtinTools() {
+            return [
+                { type: 'function', function: { name: 'set_url', description: 'Set the target URL(s) for the next HTTP request (creates a new URL version).', parameters: { type: 'object', properties: { urls: { type: 'array', items: { type: 'string' } } }, required: ['urls'] } } },
+                { type: 'function', function: { name: 'set_headers', description: 'Set request headers for the next HTTP request.', parameters: { type: 'object', properties: { headers: { type: 'array', items: { type: 'string' } } }, required: ['headers'] } } },
+                { type: 'function', function: { name: 'set_body', description: 'Set the request body for the next HTTP request.', parameters: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] } } },
+                { type: 'function', function: { name: 'send_request', description: 'Send the currently configured HTTP request(s) using the active URL/headers/body, and return status/bytes for each.', parameters: { type: 'object', properties: { method: { type: 'string', description: 'HTTP method, defaults to the method selected in Tools.' } } } } },
+            ];
+        }
+        function pluginTools() {
+            const chip = state.activeChipId.plugins ? findChip(state.activeChipId.plugins) : null;
+            if (!chip) return [];
+            return chip.items.filter(p => p.name && p.url).map(p => ({
+                type: 'function',
+                function: { name: 'plugin_' + slug(p.name), description: `Call the external plugin "${p.name}".`, parameters: { type: 'object', properties: { input: { type: 'string' } }, required: ['input'] } },
+            }));
+        }
+        async function executeTool(call) {
+            let args = {};
+            try { args = call.arguments ? JSON.parse(call.arguments) : {}; } catch {}
+            if (call.name === 'set_url') {
+                state.versionCounters.url++;
+                const entry = { id: uid(), kind: 'chip', type: 'url', version: state.versionCounters.url, items: args.urls || [] };
+                state.chatLog.push(entry); state.activeChipId.url = entry.id; saveState(); renderChatLog();
+                return { ok: true, created: `URL v${entry.version}`, items: entry.items };
+            }
+            if (call.name === 'set_headers') {
+                state.versionCounters.headers++;
+                const entry = { id: uid(), kind: 'chip', type: 'headers', version: state.versionCounters.headers, items: args.headers || [] };
+                state.chatLog.push(entry); state.activeChipId.headers = entry.id; saveState(); renderChatLog();
+                return { ok: true, created: `Headers v${entry.version}` };
+            }
+            if (call.name === 'set_body') {
+                state.versionCounters.body++;
+                const entry = { id: uid(), kind: 'chip', type: 'body', version: state.versionCounters.body, items: [args.body || ''] };
+                state.chatLog.push(entry); state.activeChipId.body = entry.id; saveState(); renderChatLog();
+                return { ok: true, created: `Body v${entry.version}` };
+            }
+            if (call.name === 'send_request') return await sendBatchAwait(args.method);
+            if (call.name.startsWith('plugin_')) {
+                const chip = state.activeChipId.plugins ? findChip(state.activeChipId.plugins) : null;
+                const plugin = chip && chip.items.find(p => 'plugin_' + slug(p.name) === call.name);
+                if (!plugin) return { error: 'Plugin not found — check /plugins.' };
+                return await callPluginAsync(plugin.url, args);
+            }
+            return { error: `Unknown tool ${call.name}` };
+        }
+        function logStep(text) { state.chatLog.push({ id: uid(), kind: 'step', text }); saveState(); renderChatLog(); }
+        function addChatEntry(entry) { state.chatLog.push(Object.assign({ id: uid() }, entry)); saveState(); renderChatLog(); }
+
+        async function runAgent(userText) {
+            if (!aiIsAuthorized()) {
+                addChatEntry({ kind: 'user', text: userText });
+                addChatEntry({ kind: 'assistant', text: 'Agent mode needs the AI assistant enabled in Tools first.' });
+                return;
+            }
+            addChatEntry({ kind: 'user', text: userText });
+            state.agentHistory.push({ role: 'user', content: userText });
+            if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
+            const tools = [...builtinTools(), ...pluginTools()];
+            let iterations = 0;
+            while (iterations < 4) {
+                iterations++;
+                logStep(`Thinking… (step ${iterations}, can take a while on CPU)`);
+                const result = await callLLMAsync(state.agentHistory, tools);
+                if (result.error) {
+                    logStep(`Error: ${result.error}`);
+                    addChatEntry({ kind: 'assistant', text: 'Error: ' + result.error });
+                    saveState();
+                    return;
+                }
+                if (result.toolCalls && result.toolCalls.length) {
+                    state.agentHistory.push({
+                        role: 'assistant', content: result.content || '',
+                        tool_calls: result.toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } })),
+                    });
+                    for (const call of result.toolCalls) {
+                        logStep(`Calling ${call.name}(${call.arguments || ''})`);
+                        let toolResult;
+                        try { toolResult = await executeTool(call); } catch (err) { toolResult = { error: err.message }; }
+                        logStep(`${call.name} -> ${JSON.stringify(toolResult).slice(0, 200)}`);
+                        state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
+                    }
+                    saveState();
+                    continue;
+                }
+                state.agentHistory.push({ role: 'assistant', content: result.content || '' });
+                addChatEntry({ kind: 'assistant', text: result.content || '(no response)' });
+                if (result.promptTokens != null || result.responseTokens != null) {
+                    logStep(`${(result.promptTokens || 0) + (result.responseTokens || 0)} tokens used`);
+                }
+                saveState();
+                return;
+            }
+            addChatEntry({ kind: 'assistant', text: '(stopped after too many tool steps — try a simpler request)' });
+        }
+
+        // ---------- AI assistant gate + one-off actions (in Tools) ----------
         const AI_AUTH_KEY = 'hackeraiRepeaterAiAuthorized';
-
-        function aiIsAuthorized() {
-            return localStorage.getItem(AI_AUTH_KEY) === 'true';
-        }
-        function aiShowMain() {
-            aiGate.style.display = 'none';
-            aiMain.style.display = 'flex';
-        }
+        function aiIsAuthorized() { return localStorage.getItem(AI_AUTH_KEY) === 'true'; }
+        function aiShowMain() { aiGate.style.display = 'none'; aiMain.style.display = 'flex'; }
         if (aiIsAuthorized()) aiShowMain();
-
-        aiToggleBtn.addEventListener('click', () => {
-            aiPanel.classList.toggle('collapsed');
-            aiToggleBtn.classList.toggle('active', !aiPanel.classList.contains('collapsed'));
-        });
-        aiAuthCheckbox.addEventListener('change', () => {
-            aiEnableBtn.disabled = !aiAuthCheckbox.checked;
-        });
+        aiAuthCheckbox.addEventListener('change', () => { aiEnableBtn.disabled = !aiAuthCheckbox.checked; });
         aiEnableBtn.addEventListener('click', () => {
             if (!aiAuthCheckbox.checked) return;
             localStorage.setItem(AI_AUTH_KEY, 'true');
             aiShowMain();
         });
 
-        function callOllama(prompt) {
-            aiSuggestBtn.disabled = true;
-            aiAnalyzeBtn.disabled = true;
+        async function runOneOff(prompt) {
+            aiSuggestBtn.disabled = true; aiAnalyzeBtn.disabled = true;
             aiOutput.innerHTML = '<span class="ai-loading">Thinking… (can take a while on CPU)</span>';
             aiTokens.textContent = '';
-            vscode.postMessage({ type: 'aiRequest', model: aiModel.value, prompt });
+            const result = await callLLMAsync([...state.agentHistory.slice(0, 1), { role: 'user', content: prompt }], []);
+            aiSuggestBtn.disabled = false; aiAnalyzeBtn.disabled = false;
+            if (result.error) { aiOutput.innerHTML = `<span class="ai-error">${escapeHtml(result.error)}</span>`; return; }
+            aiOutput.textContent = result.content;
+            if (result.promptTokens != null || result.responseTokens != null) {
+                const total = (result.promptTokens || 0) + (result.responseTokens || 0);
+                aiTokens.textContent = `${total} tokens (${result.promptTokens || 0} prompt + ${result.responseTokens || 0} response)`;
+            }
         }
-
         aiSuggestBtn.addEventListener('click', () => {
             const urlChip = state.activeChipId.url ? findChip(state.activeChipId.url) : null;
+            if (!urlChip || urlChip.items.length === 0) { aiOutput.innerHTML = '<span class="ai-error">No URL set — use /url first.</span>'; return; }
             const headersChip = state.activeChipId.headers ? findChip(state.activeChipId.headers) : null;
             const bodyChip = state.activeChipId.body ? findChip(state.activeChipId.body) : null;
-            if (!urlChip || urlChip.items.length === 0) {
-                aiOutput.innerHTML = '<span class="ai-error">No URL set — use /url first.</span>';
-                return;
-            }
-            const prompt = `Suggest a security-testing payload variant for this HTTP request. ` +
-                `Explain briefly why each suggested change is worth trying.\n\n` +
-                `Method: ${methodEl.value}\nURL(s):\n${urlChip.items.join('\n')}\n` +
-                `Headers:\n${headersChip ? headersChip.items.join('\n') : '(none)'}\n\n` +
-                `Body:\n${bodyChip ? bodyChip.items.join('\n') : '(none)'}`;
-            callOllama(prompt);
+            runOneOff(`Suggest a security-testing payload variant for this HTTP request. Explain briefly why each suggested change is worth trying.\n\n` +
+                `Method: ${methodEl.value}\nURL(s):\n${urlChip.items.join('\n')}\nHeaders:\n${headersChip ? headersChip.items.join('\n') : '(none)'}\n\nBody:\n${bodyChip ? bodyChip.items.join('\n') : '(none)'}`);
         });
-
         aiAnalyzeBtn.addEventListener('click', () => {
-            if (!lastResponseForAI) {
-                aiOutput.innerHTML = '<span class="ai-error">No response yet — send a request first.</span>';
-                return;
-            }
-            const prompt = `Analyze this HTTP response for potential vulnerabilities or interesting behavior ` +
-                `(e.g. reflected input, verbose errors, misconfigurations). Be specific about what in the ` +
-                `response triggered each observation.\n\n` +
-                `Status: ${lastResponseForAI.statusCode} ${lastResponseForAI.statusMessage}\n` +
-                `Headers:\n${JSON.stringify(lastResponseForAI.headers, null, 2)}\n\n` +
-                `Body:\n${(lastResponseForAI.body || '').slice(0, 8000)}`;
-            callOllama(prompt);
+            if (!lastResponseForAI) { aiOutput.innerHTML = '<span class="ai-error">No response yet — send a request first.</span>'; return; }
+            runOneOff(`Analyze this HTTP response for potential vulnerabilities or interesting behavior (e.g. reflected input, verbose errors, misconfigurations). Be specific.\n\n` +
+                `Status: ${lastResponseForAI.statusCode} ${lastResponseForAI.statusMessage}\nHeaders:\n${JSON.stringify(lastResponseForAI.headers, null, 2)}\n\nBody:\n${(lastResponseForAI.body || '').slice(0, 8000)}`);
         });
 
         // ---------- Initial render ----------
