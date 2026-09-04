@@ -1,0 +1,48 @@
+{
+  "name": "hackerai-repeater",
+  "displayName": "HackerAI Repeater",
+  "description": "HTTP request builder and repeater — Burp Repeater inside VS Code",
+  "version": "1.0.0",
+  "publisher": "hackerai",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Debuggers"
+  ],
+  "keywords": ["pentest", "http", "repeater", "burp", "hackerai"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "hackeraiRepeater.openRepeater",
+        "title": "HackerAI: Open Repeater"
+      },
+      {
+        "command": "hackeraiRepeater.sendToRepeater",
+        "title": "HackerAI: Send Request to Repeater"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "hackeraiRepeater.openRepeater",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "hackeraiRepeater.sendToRepeater",
+          "when": "editorHasSelection",
+          "group": "hackerai"
+        }
+      ]
+    }
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}

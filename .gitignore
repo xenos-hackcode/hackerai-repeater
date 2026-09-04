@@ -1,0 +1,3 @@
+finetune/
+*.vsix
+node_modules/
