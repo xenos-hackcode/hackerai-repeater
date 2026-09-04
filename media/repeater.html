@@ -48,11 +48,6 @@
             flex-shrink: 0;
             cursor: default;
         }
-        .logo-back-icon { display: none; stroke: var(--accent); }
-        .logo.back { cursor: pointer; border-color: var(--accent); background: rgba(55, 148, 255, 0.12); }
-        .logo.back:hover { background: rgba(55, 148, 255, 0.25); }
-        .logo.back .logo-x { display: none; }
-        .logo.back .logo-back-icon { display: block; }
         .logo-x {
             font-weight: 700;
             font-size: 13px;
@@ -389,9 +384,8 @@
 <body>
     <div class="app">
         <div class="topbar">
-            <div class="logo" id="logo" title="Back">
+            <div class="logo" id="logo">
                 <span class="logo-x">X</span>
-                <svg class="icon logo-back-icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             </div>
             <span class="title">HackerAI Repeater</span>
             <div class="spacer"></div>
@@ -399,6 +393,10 @@
                 <button class="mode-btn" id="askModeBtn" title="Ask: chat only, no autonomous actions">Ask</button>
                 <button class="mode-btn" id="agentModeBtn" data-mode="agent" title="Agent: AI can call tools and act on its own">Agent</button>
             </div>
+            <button class="icon-btn" id="backBtn" title="Back to chat" hidden>
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back
+            </button>
             <button class="icon-btn" id="toolsToggleBtn" title="Tools">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a1.5 1.5 0 0 0 2 2l6-6a4 4 0 0 0 5.4-5.4l-2.1 2.1-2-2 2.1-2.1Z"/></svg>
                 Tools
@@ -488,7 +486,7 @@
         const vscode = acquireVsCodeApi();
 
         // ---------- DOM refs ----------
-        const logo = document.getElementById('logo');
+        const backBtn = document.getElementById('backBtn');
         const toolsToggleBtn = document.getElementById('toolsToggleBtn');
         const askModeBtn = document.getElementById('askModeBtn');
         const agentModeBtn = document.getElementById('agentModeBtn');
@@ -678,14 +676,15 @@
             return div;
         }
 
-        // ---------- Navigation (logo = back) ----------
+        // ---------- Navigation ----------
         function anyFullscreenOpen() {
             return !resultsView.classList.contains('hidden') || !toolsView.classList.contains('hidden');
         }
         function closeFullscreens() {
             resultsView.classList.add('hidden');
             toolsView.classList.add('hidden');
-            logo.classList.remove('back');
+            backBtn.hidden = true;
+            toolsToggleBtn.hidden = false;
         }
         function openResultsView(entry) {
             toolsView.classList.add('hidden');
@@ -693,14 +692,16 @@
             fsBody.innerHTML = '';
             entry.items.forEach(item => fsBody.appendChild(renderFsItem(entry.method, item)));
             resultsView.classList.remove('hidden');
-            logo.classList.add('back');
+            backBtn.hidden = false;
+            toolsToggleBtn.hidden = true;
         }
         function openToolsView() {
             resultsView.classList.add('hidden');
             toolsView.classList.remove('hidden');
-            logo.classList.add('back');
+            backBtn.hidden = false;
+            toolsToggleBtn.hidden = true;
         }
-        logo.addEventListener('click', () => { if (anyFullscreenOpen()) closeFullscreens(); });
+        backBtn.addEventListener('click', closeFullscreens);
         toolsToggleBtn.addEventListener('click', openToolsView);
 
         function renderFsItem(method, item) {
