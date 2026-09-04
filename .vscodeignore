@@ -1,3 +1,4 @@
 finetune/**
 .vscode/**
 **/*.map
+.gitignore

@@ -3,17 +3,72 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const { exec } = require('child_process');
 
-let panel = null;
+let activeView = null; // the current webviewView (docked panel tab), if resolved
+
+class RepeaterViewProvider {
+    constructor(extensionPath) {
+        this.extensionPath = extensionPath;
+    }
+
+    resolveWebviewView(webviewView) {
+        activeView = webviewView;
+        webviewView.webview.options = { enableScripts: true };
+
+        const htmlPath = path.join(this.extensionPath, 'media', 'repeater.html');
+        webviewView.webview.html = fs.readFileSync(htmlPath, 'utf8');
+
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+            switch (message.type) {
+                case 'sendRequest':
+                    await handleSendRequest(message, webviewView);
+                    break;
+                case 'llmCall':
+                    await handleLLMCall(message, webviewView);
+                    break;
+                case 'pluginCall':
+                    await handlePluginCall(message, webviewView);
+                    break;
+                case 'apiValidate':
+                    await handleApiValidate(message, webviewView);
+                    break;
+                case 'fsCall':
+                    await handleFsCall(message, webviewView);
+                    break;
+                case 'terminalCall':
+                    await handleTerminalCall(message, webviewView);
+                    break;
+                case 'log':
+                    console.log('[Repeater]', message.text);
+                    break;
+            }
+        });
+
+        webviewView.onDidDispose(() => {
+            if (activeView === webviewView) activeView = null;
+        });
+    }
+}
 
 function activate(context) {
     console.log('HackerAI Repeater activated');
 
-    const openCommand = vscode.commands.registerCommand('hackeraiRepeater.openRepeater', (initialRequest) => {
-        createOrShowPanel(context.extensionPath, initialRequest);
+    const provider = new RepeaterViewProvider(context.extensionPath);
+    const providerRegistration = vscode.window.registerWebviewViewProvider(
+        'hackeraiRepeater.view',
+        provider,
+        { webviewOptions: { retainContextWhenHidden: true } }
+    );
+
+    const openCommand = vscode.commands.registerCommand('hackeraiRepeater.openRepeater', async (initialRequest) => {
+        await vscode.commands.executeCommand('hackeraiRepeater.view.focus');
+        if (initialRequest && activeView) {
+            activeView.webview.postMessage({ type: 'loadRequest', data: initialRequest });
+        }
     });
 
-    const sendCommand = vscode.commands.registerCommand('hackeraiRepeater.sendToRepeater', () => {
+    const sendCommand = vscode.commands.registerCommand('hackeraiRepeater.sendToRepeater', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
         const selection = editor.document.getText(editor.selection);
@@ -21,62 +76,76 @@ function activate(context) {
             vscode.window.showWarningMessage('No text selected');
             return;
         }
-        createOrShowPanel(context.extensionPath, selection);
+        await vscode.commands.executeCommand('hackeraiRepeater.view.focus');
+        if (activeView) {
+            activeView.webview.postMessage({ type: 'loadRequest', data: selection });
+        }
     });
 
-    context.subscriptions.push(openCommand, sendCommand);
+    context.subscriptions.push(providerRegistration, openCommand, sendCommand);
 }
 
-function createOrShowPanel(extensionPath, initialRequest = '') {
-    if (panel) {
-        panel.reveal(vscode.ViewColumn.Beside);
-        if (initialRequest) {
-            panel.webview.postMessage({ type: 'loadRequest', data: initialRequest });
+function getWorkspaceRoot() {
+    const folders = vscode.workspace.workspaceFolders;
+    return folders && folders[0] ? folders[0].uri.fsPath : null;
+}
+
+// Resolves a relative path against the open workspace folder, rejecting anything
+// that would escape it (basic guard against path traversal, accidental or otherwise).
+function resolveSafePath(relPath) {
+    const root = getWorkspaceRoot();
+    if (!root) throw new Error('No workspace folder is open.');
+    const resolvedRoot = path.resolve(root);
+    const target = path.resolve(resolvedRoot, relPath || '.');
+    if (target !== resolvedRoot && !target.startsWith(resolvedRoot + path.sep)) {
+        throw new Error('Path escapes the open workspace folder.');
+    }
+    return target;
+}
+
+async function handleFsCall(message, panel) {
+    const { requestId, op, path: relPath, content } = message;
+    try {
+        const target = resolveSafePath(relPath);
+        let result;
+        if (op === 'list_directory') {
+            const entries = fs.readdirSync(target, { withFileTypes: true });
+            result = entries.map(e => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }));
+        } else if (op === 'read_file') {
+            const text = fs.readFileSync(target, 'utf8');
+            result = text.length > 100000 ? text.slice(0, 100000) + '\n...[truncated]' : text;
+        } else if (op === 'write_file') {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, content || '', 'utf8');
+            result = { ok: true, path: relPath };
+        } else {
+            throw new Error(`Unknown filesystem operation: ${op}`);
         }
+        panel.webview.postMessage({ type: 'fsResult', requestId, data: { result } });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'fsResult', requestId, data: { error: err.message } });
+    }
+}
+
+function handleTerminalCall(message, panel) {
+    const { requestId, command } = message;
+    const cwd = getWorkspaceRoot();
+    if (!cwd) {
+        panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: 'No workspace folder is open.' } });
         return;
     }
-
-    panel = vscode.window.createWebviewPanel(
-        'hackeraiRepeater.repeaterView',
-        'HackerAI Repeater',
-        vscode.ViewColumn.Beside,
-        {
-            enableScripts: true,
-            retainContextWhenHidden: true,
-        }
-    );
-
-    const htmlPath = path.join(extensionPath, 'media', 'repeater.html');
-    let html = fs.readFileSync(htmlPath, 'utf8');
-    // Fix resource paths if needed — we used inline everything, so no substitutions needed
-    panel.webview.html = html;
-
-    panel.webview.onDidReceiveMessage(async (message) => {
-        switch (message.type) {
-            case 'sendRequest':
-                await handleSendRequest(message, panel);
-                break;
-            case 'llmCall':
-                await handleLLMCall(message, panel);
-                break;
-            case 'pluginCall':
-                await handlePluginCall(message, panel);
-                break;
-            case 'apiValidate':
-                await handleApiValidate(message, panel);
-                break;
-            case 'log':
-                console.log('[Repeater]', message.text);
-                break;
-        }
-    });
-
-    if (initialRequest) {
-        panel.webview.postMessage({ type: 'loadRequest', data: initialRequest });
-    }
-
-    panel.onDidDispose(() => {
-        panel = null;
+    exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        panel.webview.postMessage({
+            type: 'terminalResult', requestId,
+            data: {
+                result: {
+                    stdout: stdout.slice(0, 20000),
+                    stderr: stderr.slice(0, 20000),
+                    exitCode: err ? (err.code != null ? err.code : 1) : 0,
+                    error: err && err.killed ? 'Command timed out after 60s' : undefined,
+                },
+            },
+        });
     });
 }
 

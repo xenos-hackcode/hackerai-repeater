@@ -206,6 +206,19 @@
         .status-err { color: var(--red); }
         .status-pending { color: var(--fg-dim); }
 
+        .confirm-entry {
+            border: 1px solid var(--glitch-red);
+            background: rgba(255, 43, 109, 0.08);
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-size: 12px;
+        }
+        .confirm-label { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; margin-bottom: 6px; word-break: break-word; }
+        .confirm-actions { display: flex; gap: 6px; }
+        .confirm-status { font-size: 11px; font-weight: 600; }
+        .confirm-status.approved { color: var(--green); }
+        .confirm-status.denied { color: var(--red); }
+
         /* Command menu */
         .command-menu {
             margin: 0 10px;
@@ -421,10 +434,12 @@
                 </div>
             </div>
 
+            <div class="command-menu" id="confirmMenu" hidden></div>
             <div class="input-bar" id="inputBar">
                 <button class="round-btn" id="plusBtn" title="Commands">
                     <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                 </button>
+                <button class="round-btn" id="confirmModeBtn" title="AI action mode">#</button>
                 <input id="chatInput" placeholder="Type / for commands, or @ to send" spellcheck="false">
                 <button class="round-btn send" id="sendBtn" title="Send (@)">
                     <svg class="icon" viewBox="0 0 24 24" stroke="#fff"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
@@ -510,6 +525,8 @@
         const chatInput = document.getElementById('chatInput');
         const plusBtn = document.getElementById('plusBtn');
         const sendBtn = document.getElementById('sendBtn');
+        const confirmModeBtn = document.getElementById('confirmModeBtn');
+        const confirmMenu = document.getElementById('confirmMenu');
         const resultsView = document.getElementById('resultsView');
         const toolsView = document.getElementById('toolsView');
         const fsTitle = document.getElementById('fsTitle');
@@ -535,6 +552,7 @@
             { name: 'output', desc: 'Toggle the AI step-by-step log' },
             { name: 'plugins', desc: 'Link external tool plugins' },
             { name: 'api', desc: 'Connect Claude or another AI/API' },
+            { name: 'prompt', desc: 'Edit the AI\'s system prompt' },
         ];
         const BUILDER_META = {
             url: { label: 'Add target URL(s)', placeholder: 'https://example.com/api/endpoint' },
@@ -550,7 +568,14 @@
                 { key: 'baseUrl', placeholder: 'Base URL (only for a custom/unknown provider)' },
                 { key: 'model', placeholder: 'Model override (optional)' },
             ] },
+            prompt: { label: 'Edit the system prompt -- applies to every reply on this device from now on', isPrompt: true },
         };
+
+        const DEFAULT_SYSTEM_PROMPT = 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
+            'You can call tools to set the target URL(s), headers, body, send HTTP requests, read/write files, list directories, and run ' +
+            'terminal commands (terminal commands always need explicit user approval first, regardless of mode). ' +
+            'Keep your own working notes, plans, and context in a "hacker" folder at the workspace root (e.g. hacker/NOTES.md), the way ' +
+            'Claude Code keeps a .claude folder. Only act on targets and files the user has authorized. Keep replies concise.';
 
         function loadState() {
             try {
@@ -565,25 +590,19 @@
                 mode: 'ask',
                 agentHistory: [{
                     role: 'system',
-                    content: 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
-                        'You can call tools to set the target URL(s), headers, body, and to send the currently configured HTTP request. ' +
-                        'Only act on targets the user has authorized. Keep replies concise.',
+                    content: DEFAULT_SYSTEM_PROMPT,
                 }],
             };
         }
         const state = loadState();
         if (!state.mode) state.mode = 'ask';
+        if (!state.confirmMode) state.confirmMode = 'automated';
         if (!state.activeChipId.plugins) state.activeChipId.plugins = state.activeChipId.plugins || null;
         if (!state.activeChipId.api) state.activeChipId.api = state.activeChipId.api || null;
         if (state.versionCounters.plugins == null) state.versionCounters.plugins = 0;
         if (state.versionCounters.api == null) state.versionCounters.api = 0;
         if (!Array.isArray(state.agentHistory) || !state.agentHistory.length) {
-            state.agentHistory = [{
-                role: 'system',
-                content: 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
-                    'You can call tools to set the target URL(s), headers, body, and to send the currently configured HTTP request. ' +
-                    'Only act on targets the user has authorized. Keep replies concise.',
-            }];
+            state.agentHistory = [{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }];
         }
         let lastResponseForAI = null;
         let pendingRequests = {};   // requestId -> { entryId, index }
@@ -591,6 +610,9 @@
         let llmPending = {};       // requestId -> resolve
         let pluginPending = {};    // requestId -> resolve
         let apiValidatePending = {}; // requestId -> resolve
+        let fsPending = {};        // requestId -> resolve
+        let terminalPending = {};  // requestId -> resolve
+        let pendingConfirms = {};  // confirm entry id -> resolve(approved)
 
         function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
         function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -621,6 +643,7 @@
                 else if (entry.kind === 'note') { const d = document.createElement('div'); d.className = 'note-row'; d.textContent = entry.text; chatLogEl.appendChild(d); }
                 else if (entry.kind === 'step') { const d = document.createElement('div'); d.className = 'step-row'; d.textContent = entry.text; chatLogEl.appendChild(d); }
                 else if (entry.kind === 'result') chatLogEl.appendChild(renderResultEntry(entry));
+                else if (entry.kind === 'confirm') chatLogEl.appendChild(renderConfirmEntry(entry));
                 else if (entry.kind === 'user' || entry.kind === 'assistant') chatLogEl.appendChild(renderMsg(entry));
             });
             if (thinking) {
@@ -681,6 +704,33 @@
             div.appendChild(title);
             div.appendChild(summary);
             div.addEventListener('click', () => openResultsView(entry));
+            return div;
+        }
+
+        function renderConfirmEntry(entry) {
+            const div = document.createElement('div');
+            div.className = 'confirm-entry';
+            const label = document.createElement('div');
+            label.className = 'confirm-label';
+            label.textContent = `${entry.name}(${entry.args})`;
+            div.appendChild(label);
+            if (entry.resolved) {
+                const status = document.createElement('div');
+                status.className = entry.approved ? 'confirm-status approved' : 'confirm-status denied';
+                status.textContent = entry.approved ? 'Approved' : 'Denied';
+                div.appendChild(status);
+            } else {
+                const actions = document.createElement('div');
+                actions.className = 'confirm-actions';
+                const acceptBtn = document.createElement('button');
+                acceptBtn.className = 'text-btn primary'; acceptBtn.textContent = 'Accept';
+                acceptBtn.addEventListener('click', () => pendingConfirms[entry.id] && pendingConfirms[entry.id](true));
+                const denyBtn = document.createElement('button');
+                denyBtn.className = 'text-btn'; denyBtn.textContent = 'Deny';
+                denyBtn.addEventListener('click', () => pendingConfirms[entry.id] && pendingConfirms[entry.id](false));
+                actions.appendChild(acceptBtn); actions.appendChild(denyBtn);
+                div.appendChild(actions);
+            }
             return div;
         }
 
@@ -756,6 +806,36 @@
         }
         function hideCommandMenu() { commandMenu.hidden = true; commandMenu.innerHTML = ''; }
 
+        // ---------- AI action mode (# button): Manual asks before every tool call, Automated doesn't ----------
+        const CONFIRM_MODES = [
+            { name: 'manual', label: 'Manual', desc: 'Every AI action asks for your OK first' },
+            { name: 'automated', label: 'Automated', desc: 'Actions run immediately (terminal always still asks)' },
+        ];
+        function renderConfirmModeBtn() {
+            confirmModeBtn.title = `AI action mode: ${state.confirmMode === 'manual' ? 'Manual' : 'Automated'} (click to change)`;
+            confirmModeBtn.style.color = state.confirmMode === 'manual' ? 'var(--yellow)' : '';
+        }
+        function toggleConfirmMenu() {
+            if (!confirmMenu.hidden) { confirmMenu.hidden = true; confirmMenu.innerHTML = ''; return; }
+            confirmMenu.innerHTML = '';
+            CONFIRM_MODES.forEach(m => {
+                const item = document.createElement('div');
+                item.className = 'command-item';
+                item.innerHTML = `<span class="cmd-name">${m.label}</span><span class="cmd-desc">${m.desc}</span>`;
+                item.addEventListener('click', () => {
+                    state.confirmMode = m.name;
+                    saveState();
+                    renderConfirmModeBtn();
+                    confirmMenu.hidden = true;
+                    confirmMenu.innerHTML = '';
+                });
+                confirmMenu.appendChild(item);
+            });
+            confirmMenu.hidden = false;
+        }
+        confirmModeBtn.addEventListener('click', toggleConfirmMenu);
+        renderConfirmModeBtn();
+
         function runCommand(name) {
             if (name === 'output') {
                 state.showOutput = !state.showOutput;
@@ -766,13 +846,17 @@
             openBuilder(name, null);
         }
 
+        let promptTextarea = null;
+
         // ---------- Builder (compose /url /headers /body /plugins /api) ----------
         let builder = null; // { type, chipId, items }
         let builderInputs = []; // live DOM input refs for the current row
 
         function openBuilder(type, chipId) {
             let items = [];
-            if (chipId) {
+            if (type === 'prompt') {
+                items = [state.agentHistory[0].content];
+            } else if (chipId) {
                 const chip = findChip(chipId);
                 if (chip) items = chip.items.slice();
             }
@@ -793,6 +877,7 @@
         }
         function renderBuilderTags() {
             builderTags.innerHTML = '';
+            if (BUILDER_META[builder.type].isPrompt) return;
             builder.items.forEach((val, idx) => {
                 const tag = document.createElement('div');
                 tag.className = 'builder-tag';
@@ -809,6 +894,16 @@
             const meta = BUILDER_META[builder.type];
             builderRow.innerHTML = '';
             builderInputs = [];
+            promptTextarea = null;
+            if (meta.isPrompt) {
+                promptTextarea = document.createElement('textarea');
+                promptTextarea.value = builder.items[0] || '';
+                promptTextarea.rows = 6;
+                promptTextarea.style.cssText = 'flex:1;background:var(--bg-input);border:1px solid var(--border);color:var(--fg);padding:8px;font-size:12px;font-family:inherit;border-radius:3px;resize:vertical;';
+                builderRow.appendChild(promptTextarea);
+                promptTextarea.focus();
+                return;
+            }
             const specs = meta.fields || [{ key: 'value', placeholder: meta.placeholder }];
             specs.forEach((f, i) => {
                 const inp = document.createElement('input');
@@ -851,6 +946,15 @@
 
         builderOkBtn.addEventListener('click', () => {
             if (!builder) return;
+            if (BUILDER_META[builder.type].isPrompt) {
+                state.agentHistory[0].content = (promptTextarea.value || '').trim() || DEFAULT_SYSTEM_PROMPT;
+                saveState();
+                state.chatLog.push({ id: uid(), kind: 'note', text: 'System prompt updated -- applies from here on.' });
+                saveState();
+                renderChatLog();
+                closeBuilder();
+                return;
+            }
             builderAddCurrent();
             const { type, chipId, items } = builder;
             let chip;
@@ -924,23 +1028,11 @@
         renderMode();
 
         async function runAsk(userText) {
-            addChatEntry({ kind: 'user', text: userText });
-            state.agentHistory.push({ role: 'user', content: userText });
-            if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
-            logStep('Thinking… (Ask mode — no tool calls, can take a while on CPU)');
-            setThinking(true);
-            const result = await callLLMAsync(state.agentHistory, []);
-            setThinking(false);
-            if (result.error) {
-                addChatEntry({ kind: 'assistant', text: 'Error: ' + result.error });
-                return;
-            }
-            state.agentHistory.push({ role: 'assistant', content: result.content || '' });
-            addChatEntry({ kind: 'assistant', text: result.content || '(no response)' });
-            if (result.promptTokens != null || result.responseTokens != null) {
-                logStep(`${(result.promptTokens || 0) + (result.responseTokens || 0)} tokens used`);
-            }
-            saveState();
+            // Ask mode never gets the HTTP/plugin tools (those stay Agent-only), but once
+            // authorized it can read/write files and run terminal commands -- the latter
+            // always confirms first regardless, so it's not truly tool-free anymore.
+            const tools = aiIsAuthorized() ? [...fsTools(), ...terminalTools()] : [];
+            await runChatTurn(userText, tools);
         }
 
         // ---------- Direct sending (manual @ / send button) ----------
@@ -1026,6 +1118,14 @@
                 const resolve = apiValidatePending[msg.requestId];
                 if (resolve) { delete apiValidatePending[msg.requestId]; resolve(msg.data); }
 
+            } else if (msg.type === 'fsResult') {
+                const resolve = fsPending[msg.requestId];
+                if (resolve) { delete fsPending[msg.requestId]; resolve(msg.data); }
+
+            } else if (msg.type === 'terminalResult') {
+                const resolve = terminalPending[msg.requestId];
+                if (resolve) { delete terminalPending[msg.requestId]; resolve(msg.data); }
+
             } else if (msg.type === 'loadRequest') {
                 loadRawRequest(msg.data);
             }
@@ -1103,6 +1203,45 @@
                 function: { name: 'plugin_' + slug(p.name), description: `Call the external plugin "${p.name}".`, parameters: { type: 'object', properties: { input: { type: 'string' } }, required: ['input'] } },
             }));
         }
+        function fsTools() {
+            return [
+                { type: 'function', function: { name: 'list_directory', description: 'List files and folders at a path relative to the open workspace folder.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Relative path; defaults to the workspace root.' } } } } },
+                { type: 'function', function: { name: 'read_file', description: 'Read a text file relative to the open workspace folder.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+                { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a text file relative to the open workspace folder, creating parent folders as needed.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+            ];
+        }
+        function terminalTools() {
+            return [
+                { type: 'function', function: { name: 'run_terminal_command', description: 'Run a shell command in the open workspace folder. Always asks for your approval first, regardless of the current AI action mode.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
+            ];
+        }
+        function callFsAsync(op, path, content) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                fsPending[requestId] = resolve;
+                vscode.postMessage({ type: 'fsCall', requestId, op, path, content });
+            });
+        }
+        function callTerminalAsync(command) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                terminalPending[requestId] = resolve;
+                vscode.postMessage({ type: 'terminalCall', requestId, command });
+            });
+        }
+        // Confirmation gate: renders an Accept/Deny chat entry and waits for the user's click.
+        function requestConfirm(call) {
+            return new Promise((resolve) => {
+                const id = uid();
+                addChatEntry({ kind: 'confirm', id, name: call.name, args: call.arguments || '', resolved: false });
+                pendingConfirms[id] = (approved) => {
+                    const entry = state.chatLog.find(e => e.id === id);
+                    if (entry) { entry.resolved = true; entry.approved = approved; saveState(); renderChatLog(); }
+                    delete pendingConfirms[id];
+                    resolve(approved);
+                };
+            });
+        }
         async function executeTool(call) {
             let args = {};
             try { args = call.arguments ? JSON.parse(call.arguments) : {}; } catch {}
@@ -1125,6 +1264,10 @@
                 return { ok: true, created: `Body v${entry.version}` };
             }
             if (call.name === 'send_request') return await sendBatchAwait(args.method);
+            if (call.name === 'list_directory') return await callFsAsync('list_directory', args.path);
+            if (call.name === 'read_file') return await callFsAsync('read_file', args.path);
+            if (call.name === 'write_file') return await callFsAsync('write_file', args.path, args.content);
+            if (call.name === 'run_terminal_command') return await callTerminalAsync(args.command);
             if (call.name.startsWith('plugin_')) {
                 const chip = state.activeChipId.plugins ? findChip(state.activeChipId.plugins) : null;
                 const plugin = chip && chip.items.find(p => 'plugin_' + slug(p.name) === call.name);
@@ -1136,16 +1279,12 @@
         function logStep(text) { state.chatLog.push({ id: uid(), kind: 'step', text }); saveState(); renderChatLog(); }
         function addChatEntry(entry) { state.chatLog.push(Object.assign({ id: uid() }, entry)); saveState(); renderChatLog(); }
 
-        async function runAgent(userText) {
-            if (!aiIsAuthorized()) {
-                addChatEntry({ kind: 'user', text: userText });
-                addChatEntry({ kind: 'assistant', text: 'Agent mode needs the AI assistant enabled in Tools first.' });
-                return;
-            }
+        // Shared by Ask (file/terminal tools only) and Agent (everything) -- the only
+        // difference between modes is which tools get offered, not this loop itself.
+        async function runChatTurn(userText, tools) {
             addChatEntry({ kind: 'user', text: userText });
             state.agentHistory.push({ role: 'user', content: userText });
             if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
-            const tools = [...builtinTools(), ...pluginTools()];
             let iterations = 0;
             setThinking(true);
             while (iterations < 4) {
@@ -1165,6 +1304,15 @@
                         tool_calls: result.toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } })),
                     });
                     for (const call of result.toolCalls) {
+                        const needsConfirm = state.confirmMode === 'manual' || call.name === 'run_terminal_command';
+                        if (needsConfirm) {
+                            const approved = await requestConfirm(call);
+                            if (!approved) {
+                                logStep(`${call.name} denied by user`);
+                                state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Denied by user' }) });
+                                continue;
+                            }
+                        }
                         logStep(`Calling ${call.name}(${call.arguments || ''})`);
                         let toolResult;
                         try { toolResult = await executeTool(call); } catch (err) { toolResult = { error: err.message }; }
@@ -1185,6 +1333,15 @@
             }
             setThinking(false);
             addChatEntry({ kind: 'assistant', text: '(stopped after too many tool steps — try a simpler request)' });
+        }
+
+        async function runAgent(userText) {
+            if (!aiIsAuthorized()) {
+                addChatEntry({ kind: 'user', text: userText });
+                addChatEntry({ kind: 'assistant', text: 'Agent mode needs the AI assistant enabled in Tools first.' });
+                return;
+            }
+            await runChatTurn(userText, [...builtinTools(), ...fsTools(), ...terminalTools(), ...pluginTools()]);
         }
 
         // ---------- AI assistant gate + one-off actions (in Tools) ----------
