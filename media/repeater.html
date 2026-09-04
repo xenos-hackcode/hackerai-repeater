@@ -394,10 +394,6 @@
                 <button class="mode-btn" id="askModeBtn" title="Ask: chat only, no autonomous actions">Ask</button>
                 <button class="mode-btn" id="agentModeBtn" data-mode="agent" title="Agent: AI can call tools and act on its own">Agent</button>
             </div>
-            <button class="icon-btn hidden" id="backBtn" title="Back to chat">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                Back
-            </button>
             <button class="icon-btn" id="toolsToggleBtn" title="Tools">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a1.5 1.5 0 0 0 2 2l6-6a4 4 0 0 0 5.4-5.4l-2.1 2.1-2-2 2.1-2.1Z"/></svg>
                 Tools
@@ -437,12 +433,24 @@
         </div>
 
         <div class="fullscreen-view hidden" id="resultsView">
-            <div class="fs-header"><span class="fs-title" id="fsTitle">Results</span></div>
+            <div class="fs-header">
+                <button class="icon-btn" id="resultsBackBtn" title="Back to chat">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                    Back
+                </button>
+                <span class="fs-title" id="fsTitle">Results</span>
+            </div>
             <div class="fs-body" id="fsBody"></div>
         </div>
 
         <div class="fullscreen-view hidden" id="toolsView">
-            <div class="fs-header"><span class="fs-title">Tools</span></div>
+            <div class="fs-header">
+                <button class="icon-btn" id="toolsBackBtn" title="Back to chat">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                    Back
+                </button>
+                <span class="fs-title">Tools</span>
+            </div>
             <div class="tools-body">
                 <div class="tools-section">
                     <h3>Request settings</h3>
@@ -487,7 +495,6 @@
         const vscode = acquireVsCodeApi();
 
         // ---------- DOM refs ----------
-        const backBtn = document.getElementById('backBtn');
         const toolsToggleBtn = document.getElementById('toolsToggleBtn');
         const askModeBtn = document.getElementById('askModeBtn');
         const agentModeBtn = document.getElementById('agentModeBtn');
@@ -684,8 +691,6 @@
         function closeFullscreens() {
             resultsView.classList.add('hidden');
             toolsView.classList.add('hidden');
-            backBtn.classList.add('hidden');
-            toolsToggleBtn.classList.remove('hidden');
         }
         function openResultsView(entry) {
             toolsView.classList.add('hidden');
@@ -693,16 +698,13 @@
             fsBody.innerHTML = '';
             entry.items.forEach(item => fsBody.appendChild(renderFsItem(entry.method, item)));
             resultsView.classList.remove('hidden');
-            backBtn.classList.remove('hidden');
-            toolsToggleBtn.classList.add('hidden');
         }
         function openToolsView() {
             resultsView.classList.add('hidden');
             toolsView.classList.remove('hidden');
-            backBtn.classList.remove('hidden');
-            toolsToggleBtn.classList.add('hidden');
         }
-        backBtn.addEventListener('click', closeFullscreens);
+        document.getElementById('resultsBackBtn').addEventListener('click', closeFullscreens);
+        document.getElementById('toolsBackBtn').addEventListener('click', closeFullscreens);
         toolsToggleBtn.addEventListener('click', openToolsView);
 
         function renderFsItem(method, item) {
