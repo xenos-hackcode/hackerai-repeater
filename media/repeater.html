@@ -48,8 +48,11 @@
             flex-shrink: 0;
             cursor: default;
         }
-        .logo.back { cursor: pointer; }
-        .logo.back:hover { border-color: var(--accent); }
+        .logo-back-icon { display: none; stroke: var(--accent); }
+        .logo.back { cursor: pointer; border-color: var(--accent); background: rgba(55, 148, 255, 0.12); }
+        .logo.back:hover { background: rgba(55, 148, 255, 0.25); }
+        .logo.back .logo-x { display: none; }
+        .logo.back .logo-back-icon { display: block; }
         .logo-x {
             font-weight: 700;
             font-size: 13px;
@@ -159,6 +162,23 @@
             color: var(--fg-dim); font-size: 10.5px; padding: 3px 8px;
             border-left: 2px solid var(--neon); background: rgba(0,255,156,0.04);
             font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        }
+        .thinking-row { display: flex; }
+        .thinking-bubble {
+            display: flex; align-items: center; gap: 4px;
+            background: var(--bg-panel); border: 1px solid var(--border);
+            padding: 8px 12px; border-radius: 6px;
+        }
+        .thinking-bubble span {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--neon);
+            animation: thinking-bounce 1.1s infinite ease-in-out;
+        }
+        .thinking-bubble span:nth-child(2) { animation-delay: 0.15s; }
+        .thinking-bubble span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes thinking-bounce {
+            0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+            30% { opacity: 1; transform: translateY(-3px); }
         }
         .msg-row { display: flex; }
         .msg-row.user { justify-content: flex-end; }
@@ -369,7 +389,10 @@
 <body>
     <div class="app">
         <div class="topbar">
-            <div class="logo" id="logo" aria-hidden="true"><span class="logo-x">X</span></div>
+            <div class="logo" id="logo" title="Back">
+                <span class="logo-x">X</span>
+                <svg class="icon logo-back-icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </div>
             <span class="title">HackerAI Repeater</span>
             <div class="spacer"></div>
             <div class="mode-toggle" id="modeToggle">
@@ -586,8 +609,16 @@
                 else if (entry.kind === 'result') chatLogEl.appendChild(renderResultEntry(entry));
                 else if (entry.kind === 'user' || entry.kind === 'assistant') chatLogEl.appendChild(renderMsg(entry));
             });
+            if (thinking) {
+                const row = document.createElement('div');
+                row.className = 'thinking-row';
+                row.innerHTML = '<div class="thinking-bubble"><span></span><span></span><span></span></div>';
+                chatLogEl.appendChild(row);
+            }
             chatLogEl.scrollTop = chatLogEl.scrollHeight;
         }
+        let thinking = false;
+        function setThinking(v) { thinking = v; renderChatLog(); }
 
         function renderMsg(entry) {
             const row = document.createElement('div');
@@ -885,7 +916,9 @@
             state.agentHistory.push({ role: 'user', content: userText });
             if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
             logStep('Thinking… (Ask mode — no tool calls, can take a while on CPU)');
+            setThinking(true);
             const result = await callLLMAsync(state.agentHistory, []);
+            setThinking(false);
             if (result.error) {
                 addChatEntry({ kind: 'assistant', text: 'Error: ' + result.error });
                 return;
@@ -1102,11 +1135,13 @@
             if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
             const tools = [...builtinTools(), ...pluginTools()];
             let iterations = 0;
+            setThinking(true);
             while (iterations < 4) {
                 iterations++;
                 logStep(`Thinking… (step ${iterations}, can take a while on CPU)`);
                 const result = await callLLMAsync(state.agentHistory, tools);
                 if (result.error) {
+                    setThinking(false);
                     logStep(`Error: ${result.error}`);
                     addChatEntry({ kind: 'assistant', text: 'Error: ' + result.error });
                     saveState();
@@ -1127,6 +1162,7 @@
                     saveState();
                     continue;
                 }
+                setThinking(false);
                 state.agentHistory.push({ role: 'assistant', content: result.content || '' });
                 addChatEntry({ kind: 'assistant', text: result.content || '(no response)' });
                 if (result.promptTokens != null || result.responseTokens != null) {
@@ -1135,6 +1171,7 @@
                 saveState();
                 return;
             }
+            setThinking(false);
             addChatEntry({ kind: 'assistant', text: '(stopped after too many tool steps — try a simpler request)' });
         }
 
