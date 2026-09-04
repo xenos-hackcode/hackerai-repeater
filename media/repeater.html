@@ -571,6 +571,14 @@
         if (!state.activeChipId.api) state.activeChipId.api = state.activeChipId.api || null;
         if (state.versionCounters.plugins == null) state.versionCounters.plugins = 0;
         if (state.versionCounters.api == null) state.versionCounters.api = 0;
+        if (!Array.isArray(state.agentHistory) || !state.agentHistory.length) {
+            state.agentHistory = [{
+                role: 'system',
+                content: 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
+                    'You can call tools to set the target URL(s), headers, body, and to send the currently configured HTTP request. ' +
+                    'Only act on targets the user has authorized. Keep replies concise.',
+            }];
+        }
         let lastResponseForAI = null;
         let pendingRequests = {};   // requestId -> { entryId, index }
         let entryResolvers = {};   // entryId -> resolve callback (used by the agent's send_request tool)
