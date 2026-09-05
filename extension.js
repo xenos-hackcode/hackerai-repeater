@@ -39,6 +39,9 @@ class RepeaterViewProvider {
                 case 'terminalCall':
                     await handleTerminalCall(message, webviewView);
                     break;
+                case 'listDevicesCall':
+                    await handleListDevices(message, webviewView);
+                    break;
                 case 'log':
                     console.log('[Repeater]', message.text);
                     break;
@@ -146,6 +149,39 @@ function handleTerminalCall(message, panel) {
                 },
             },
         });
+    });
+}
+
+// Parses `adb devices -l` output into structured rows, e.g.:
+// "R58N90ABCDE     device usb:1-1 product:redfin model:Pixel_5 device:redfin transport_id:3"
+function parseAdbDevices(output) {
+    return output
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith('List of devices'))
+        .map(line => {
+            const [id, state, ...rest] = line.split(/\s+/);
+            const info = {};
+            rest.forEach(tok => {
+                const idx = tok.indexOf(':');
+                if (idx > 0) info[tok.slice(0, idx)] = tok.slice(idx + 1);
+            });
+            return { id, state, model: info.model, product: info.product, device: info.device };
+        });
+}
+
+function handleListDevices(message, panel) {
+    const { requestId } = message;
+    exec('adb devices -l', { timeout: 15000 }, (err, stdout) => {
+        if (err) {
+            const notFound = /not found|ENOENT|is not recognized/i.test(err.message);
+            panel.webview.postMessage({
+                type: 'listDevicesResult', requestId,
+                data: { error: notFound ? 'adb not found -- install Android SDK Platform Tools and make sure adb is on your PATH.' : err.message },
+            });
+            return;
+        }
+        panel.webview.postMessage({ type: 'listDevicesResult', requestId, data: { result: parseAdbDevices(stdout) } });
     });
 }
 

@@ -483,6 +483,14 @@
                 </div>
 
                 <div class="tools-section">
+                    <h3>Devices (USB / adb)</h3>
+                    <div class="tools-row">
+                        <button class="text-btn" id="devicesRefreshBtn">Refresh</button>
+                    </div>
+                    <div class="ai-output" id="devicesOutput">Click Refresh to list Android devices connected over USB.</div>
+                </div>
+
+                <div class="tools-section">
                     <h3>AI assistant</h3>
                     <div class="banner">
                         <svg class="icon" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
@@ -545,6 +553,8 @@
         const aiAnalyzeBtn = document.getElementById('aiAnalyzeBtn');
         const aiOutput = document.getElementById('aiOutput');
         const aiTokens = document.getElementById('aiTokens');
+        const devicesRefreshBtn = document.getElementById('devicesRefreshBtn');
+        const devicesOutput = document.getElementById('devicesOutput');
 
         // ---------- State ----------
         const STORE_KEY = 'hackeraiRepeaterState';
@@ -577,6 +587,8 @@
         const DEFAULT_SYSTEM_PROMPT = 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
             'You can call tools to set the target URL(s), headers, body, send HTTP requests, read/write files, list directories, and run ' +
             'terminal commands (terminal commands always need explicit user approval first, regardless of mode). ' +
+            'You can also list Android devices connected over USB (list_usb_devices), and once one is connected, use terminal commands ' +
+            'like "adb install", "adb logcat -d", or "adb shell" for Kotlin/Android development tasks. ' +
             'Keep your own working notes, plans, and context in a "hacker" folder at the workspace root (e.g. hacker/NOTES.md), the way ' +
             'Claude Code keeps a .claude folder. Only act on targets and files the user has authorized. Keep replies concise.';
 
@@ -615,6 +627,7 @@
         let apiValidatePending = {}; // requestId -> resolve
         let fsPending = {};        // requestId -> resolve
         let terminalPending = {};  // requestId -> resolve
+        let listDevicesPending = {}; // requestId -> resolve
         let pendingConfirms = {};  // confirm entry id -> resolve(approved)
 
         function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -1038,7 +1051,7 @@
             // Ask mode never gets the HTTP/plugin tools (those stay Agent-only), but once
             // authorized it can read/write files and run terminal commands -- the latter
             // always confirms first regardless, so it's not truly tool-free anymore.
-            const tools = aiIsAuthorized() ? [...fsTools(), ...terminalTools()] : [];
+            const tools = aiIsAuthorized() ? [...fsTools(), ...terminalTools(), ...deviceTools()] : [];
             await runChatTurn(userText, tools);
         }
 
@@ -1133,6 +1146,10 @@
                 const resolve = terminalPending[msg.requestId];
                 if (resolve) { delete terminalPending[msg.requestId]; resolve(msg.data); }
 
+            } else if (msg.type === 'listDevicesResult') {
+                const resolve = listDevicesPending[msg.requestId];
+                if (resolve) { delete listDevicesPending[msg.requestId]; resolve(msg.data); }
+
             } else if (msg.type === 'loadRequest') {
                 loadRawRequest(msg.data);
             }
@@ -1219,7 +1236,12 @@
         }
         function terminalTools() {
             return [
-                { type: 'function', function: { name: 'run_terminal_command', description: 'Run a shell command in the open workspace folder. Always asks for your approval first, regardless of the current AI action mode.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
+                { type: 'function', function: { name: 'run_terminal_command', description: 'Run a shell command in the open workspace folder. Always asks for your approval first, regardless of the current AI action mode. Use this for adb install/logcat/shell etc. once a device is connected.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
+            ];
+        }
+        function deviceTools() {
+            return [
+                { type: 'function', function: { name: 'list_usb_devices', description: 'List Android devices currently connected over USB (via adb). Read-only, no approval needed.', parameters: { type: 'object', properties: {} } } },
             ];
         }
         function callFsAsync(op, path, content) {
@@ -1234,6 +1256,13 @@
                 const requestId = uid();
                 terminalPending[requestId] = resolve;
                 vscode.postMessage({ type: 'terminalCall', requestId, command });
+            });
+        }
+        function callListDevicesAsync() {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                listDevicesPending[requestId] = resolve;
+                vscode.postMessage({ type: 'listDevicesCall', requestId });
             });
         }
         // Confirmation gate: renders an Accept/Deny chat entry and waits for the user's click.
@@ -1275,6 +1304,7 @@
             if (call.name === 'read_file') return await callFsAsync('read_file', args.path);
             if (call.name === 'write_file') return await callFsAsync('write_file', args.path, args.content);
             if (call.name === 'run_terminal_command') return await callTerminalAsync(args.command);
+            if (call.name === 'list_usb_devices') return await callListDevicesAsync();
             if (call.name.startsWith('plugin_')) {
                 const chip = state.activeChipId.plugins ? findChip(state.activeChipId.plugins) : null;
                 const plugin = chip && chip.items.find(p => 'plugin_' + slug(p.name) === call.name);
@@ -1348,7 +1378,7 @@
                 addChatEntry({ kind: 'assistant', text: 'Agent mode needs the AI assistant enabled in Tools first.' });
                 return;
             }
-            await runChatTurn(userText, [...builtinTools(), ...fsTools(), ...terminalTools(), ...pluginTools()]);
+            await runChatTurn(userText, [...builtinTools(), ...fsTools(), ...terminalTools(), ...deviceTools(), ...pluginTools()]);
         }
 
         // ---------- AI assistant gate + one-off actions (in Tools) ----------
@@ -1388,6 +1418,23 @@
             if (!lastResponseForAI) { aiOutput.innerHTML = '<span class="ai-error">No response yet — send a request first.</span>'; return; }
             runOneOff(`Analyze this HTTP response for potential vulnerabilities or interesting behavior (e.g. reflected input, verbose errors, misconfigurations). Be specific.\n\n` +
                 `Status: ${lastResponseForAI.statusCode} ${lastResponseForAI.statusMessage}\nHeaders:\n${JSON.stringify(lastResponseForAI.headers, null, 2)}\n\nBody:\n${(lastResponseForAI.body || '').slice(0, 8000)}`);
+        });
+
+        devicesRefreshBtn.addEventListener('click', async () => {
+            devicesRefreshBtn.disabled = true;
+            devicesOutput.textContent = 'Checking for devices…';
+            const data = await callListDevicesAsync();
+            devicesRefreshBtn.disabled = false;
+            if (data.error) {
+                devicesOutput.innerHTML = `<span class="ai-error">${escapeHtml(data.error)}</span>`;
+                return;
+            }
+            const devices = data.result || [];
+            if (devices.length === 0) {
+                devicesOutput.textContent = 'No devices connected.';
+                return;
+            }
+            devicesOutput.textContent = devices.map(d => `${d.id}  (${d.state}${d.model ? ', ' + d.model : ''})`).join('\n');
         });
 
         // ---------- Initial render ----------
