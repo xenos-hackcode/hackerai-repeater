@@ -1311,7 +1311,7 @@
         function requestConfirm(call) {
             return new Promise((resolve) => {
                 const id = uid();
-                addChatEntry({ kind: 'confirm', id, name: call.name, args: call.arguments || '', resolved: false });
+                addChatEntry({ kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), resolved: false });
                 pendingConfirms[id] = (approved) => {
                     const entry = state.chatLog.find(e => e.id === id);
                     if (entry) { entry.resolved = true; entry.approved = approved; saveState(); renderChatLog(); }
@@ -1320,9 +1320,19 @@
                 };
             });
         }
+        // Ollama sometimes returns tool arguments as an actual object rather than a JSON
+        // string (unlike the OpenAI-style spec this otherwise follows) -- handle both.
+        function parseToolArgs(rawArgs) {
+            if (rawArgs == null) return {};
+            if (typeof rawArgs === 'object') return rawArgs;
+            try { return JSON.parse(rawArgs); } catch { return {}; }
+        }
+        function argsPreview(rawArgs) {
+            const args = parseToolArgs(rawArgs);
+            try { return JSON.stringify(args); } catch { return String(rawArgs); }
+        }
         async function executeTool(call) {
-            let args = {};
-            try { args = call.arguments ? JSON.parse(call.arguments) : {}; } catch {}
+            const args = parseToolArgs(call.arguments);
             if (call.name === 'set_url') {
                 state.versionCounters.url++;
                 const entry = { id: uid(), kind: 'chip', type: 'url', version: state.versionCounters.url, items: args.urls || [] };
@@ -1395,7 +1405,7 @@
                                 continue;
                             }
                         }
-                        logStep(`Calling ${call.name}(${call.arguments || ''})`);
+                        logStep(`Calling ${call.name}(${argsPreview(call.arguments)})`);
                         let toolResult;
                         try { toolResult = await executeTool(call); } catch (err) { toolResult = { error: err.message }; }
                         logStep(`${call.name} -> ${JSON.stringify(toolResult).slice(0, 200)}`);

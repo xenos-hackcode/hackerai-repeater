@@ -143,24 +143,35 @@ async function handleFsCall(message, panel) {
 
 function handleTerminalCall(message, panel) {
     const { requestId, command } = message;
+    // A message handler must ALWAYS post a response, even on garbage input --
+    // exec() throws synchronously for a non-string command, which previously left
+    // the webview's promise waiting forever with no way to ever resolve it.
+    if (typeof command !== 'string' || !command.trim()) {
+        panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: `No command provided (got: ${JSON.stringify(command)}).` } });
+        return;
+    }
     const cwd = getWorkspaceRoot();
     if (!cwd) {
         panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: 'No workspace folder is open.' } });
         return;
     }
-    exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-        panel.webview.postMessage({
-            type: 'terminalResult', requestId,
-            data: {
-                result: {
-                    stdout: stdout.slice(0, 20000),
-                    stderr: stderr.slice(0, 20000),
-                    exitCode: err ? (err.code != null ? err.code : 1) : 0,
-                    error: err && err.killed ? 'Command timed out after 60s' : undefined,
+    try {
+        exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+            panel.webview.postMessage({
+                type: 'terminalResult', requestId,
+                data: {
+                    result: {
+                        stdout: stdout.slice(0, 20000),
+                        stderr: stderr.slice(0, 20000),
+                        exitCode: err ? (err.code != null ? err.code : 1) : 0,
+                        error: err && err.killed ? 'Command timed out after 60s' : undefined,
+                    },
                 },
-            },
+            });
         });
-    });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: `Could not run command: ${err.message}` } });
+    }
 }
 
 // Parses `adb devices -l` output into structured rows, e.g.:
