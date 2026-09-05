@@ -613,6 +613,10 @@
             'keep working through it step by step -- recon, test, read/write files, verify the fix -- instead of stopping after one tool ' +
             'call with just a plan. Only stop early to report back if you are blocked, need a decision only the user can make, or an ' +
             'action needs their approval (which happens automatically for terminal commands and Tor fetches). ' +
+            'If a tool result says an action was "Stopped by user", the user hit Stop mid-task -- do not assume nothing happened. A ' +
+            'stopped terminal command may have already run partway (a file could be partly written, a git operation partly done) before ' +
+            'it was killed; check its stdout/stderr in that same tool result first, and if you still cannot tell, use read_file, ' +
+            'list_directory, or a safe read-only command (e.g. git status) to check the real current state before retrying anything. ' +
             'Reply in plain conversational English, like you are talking to the user directly. Do not use bracketed tags like ' +
             '[ON_DEVICE] or [RUN_ON_PC], and do not format normal replies as tables or Report/Fix/Prevent sections -- save that structure ' +
             'only for cases where the user explicitly asks for a checklist or report. Keep replies concise.';
@@ -728,15 +732,27 @@
                 const resolve = llmPending[requestId];
                 delete llmPending[requestId];
                 currentLLMRequestId = null;
+                // Ollama is called with stream:false, so it only replies once generation is
+                // fully done -- there's no partial text sitting anywhere to recover here.
                 if (resolve) resolve({ content: '', toolCalls: [], stopped: true });
             }
             if (currentTerminalRequestId) {
                 const requestId = currentTerminalRequestId;
                 vscode.postMessage({ type: 'cancelTerminal', requestId });
-                const resolve = terminalPending[requestId];
-                delete terminalPending[requestId];
                 currentTerminalRequestId = null;
-                if (resolve) resolve({ result: { stdout: '', stderr: '', exitCode: -1, error: 'Stopped by user' } });
+                // Unlike the LLM call, a killed command's real stdout/stderr up to the point
+                // it died IS available -- exec() still reports whatever it had already
+                // captured. That's worth waiting a moment for: it's the model's only way to
+                // later check honestly what it had actually done before being stopped
+                // (e.g. did that file already get partly written, did the command even start).
+                // Only fall back to a blank result if the real one doesn't show up quickly.
+                setTimeout(() => {
+                    const resolve = terminalPending[requestId];
+                    if (resolve) {
+                        delete terminalPending[requestId];
+                        resolve({ result: { stdout: '', stderr: '', exitCode: -1, error: 'Stopped by user (no output was captured)' } });
+                    }
+                }, 4000);
             }
         }
         function renderSendBtn() {
