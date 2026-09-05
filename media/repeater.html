@@ -729,8 +729,13 @@
             const lastEntry = visible[visible.length - 1];
             if (!turnRunning && lastEntry && lastEntry.kind === 'assistant') {
                 const text = lastEntry.text || '';
-                const options = detectQuickReplyOptions(text) || (/\?\s*$/.test(text) ? ['Yes', 'No'] : null);
-                if (options) chatLogEl.appendChild(renderQuickReplies(options));
+                const detected = detectQuickReplyOptions(text);
+                // "Which file do you mean?" isn't a yes/no question -- don't offer Yes/No
+                // for an open-ended "which/what/where/who/how/why" question unless an actual
+                // list of options was found in it.
+                const openEnded = /^\s*(which|what|where|who|how|why)\b/i.test(text);
+                const options = detected || (!openEnded && /\?\s*$/.test(text) ? ['Yes', 'No'] : null);
+                if (options) chatLogEl.appendChild(renderQuickReplies(options, !!detected));
             }
             if (thinking) {
                 const row = document.createElement('div');
@@ -829,7 +834,7 @@
             if (parts.some(p => p.length > 30)) return null;
             return parts;
         }
-        function renderQuickReplies(options) {
+        function renderQuickReplies(options, includeOther) {
             const row = document.createElement('div');
             row.className = 'quick-reply-row';
             options.forEach(label => {
@@ -839,6 +844,15 @@
                 btn.addEventListener('click', () => sendUserText(/[.?!]$/.test(label) ? label : label + '.'));
                 row.appendChild(btn);
             });
+            // Only detected multi-choice lists get an Other button -- plain Yes/No is
+            // already exhaustive enough on its own, and typing is always available anyway.
+            if (includeOther) {
+                const other = document.createElement('button');
+                other.className = 'quick-reply-btn';
+                other.textContent = 'Other…';
+                other.addEventListener('click', () => chatInput.focus());
+                row.appendChild(other);
+            }
             return row;
         }
 
