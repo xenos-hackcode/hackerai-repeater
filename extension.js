@@ -142,7 +142,7 @@ async function handleFsCall(message, panel) {
 }
 
 function handleTerminalCall(message, panel) {
-    const { requestId, command } = message;
+    const { requestId, command, directory } = message;
     // A message handler must ALWAYS post a response, even on garbage input --
     // exec() throws synchronously for a non-string command, which previously left
     // the webview's promise waiting forever with no way to ever resolve it.
@@ -150,9 +150,16 @@ function handleTerminalCall(message, panel) {
         panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: `No command provided (got: ${JSON.stringify(command)}).` } });
         return;
     }
-    const cwd = getWorkspaceRoot();
+    let cwd = getWorkspaceRoot();
+    if (directory && typeof directory === 'string') {
+        if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+            panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: `Directory does not exist: ${directory}` } });
+            return;
+        }
+        cwd = directory;
+    }
     if (!cwd) {
-        panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: 'No workspace folder is open.' } });
+        panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: 'No directory specified and no workspace folder is open.' } });
         return;
     }
     try {

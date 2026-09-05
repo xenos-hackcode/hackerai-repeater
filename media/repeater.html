@@ -587,13 +587,19 @@
         const DEFAULT_SYSTEM_PROMPT = 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
             'You can call tools to set the target URL(s), headers, body, send HTTP requests, read/write files, list directories, and run ' +
             'terminal commands (terminal commands always need explicit user approval first, regardless of mode). ' +
+            'run_terminal_command takes an optional "directory" argument (an absolute path) -- always pass it explicitly when the user ' +
+            'is asking about a project other than the one currently open, including for git/gh commands (clone, push, delete a repo, etc.); ' +
+            'never assume the currently open folder is the right one for a command about a different named project. ' +
             'You can also list Android devices connected over USB (list_usb_devices), and once one is connected, use terminal commands ' +
             'like "adb install", "adb logcat -d", or "adb shell" for Kotlin/Android development tasks. ' +
             'You can search the web (web_search, DuckDuckGo instant-answer results -- limited, not full search), search Wikipedia ' +
             '(wikipedia_search, free), and fetch a URL including .onion addresses through a locally running Tor proxy (tor_fetch, ' +
             'always asks for approval first). ' +
             'Keep your own working notes, plans, and context in a "hacker" folder at the workspace root (e.g. hacker/NOTES.md), the way ' +
-            'Claude Code keeps a .claude folder. Only act on targets and files the user has authorized. Keep replies concise.';
+            'Claude Code keeps a .claude folder. Only act on targets and files the user has authorized. ' +
+            'Reply in plain conversational English, like you are talking to the user directly. Do not use bracketed tags like ' +
+            '[ON_DEVICE] or [RUN_ON_PC], and do not format normal replies as tables or Report/Fix/Prevent sections -- save that structure ' +
+            'only for cases where the user explicitly asks for a checklist or report. Keep replies concise.';
 
         function loadState() {
             try {
@@ -1257,7 +1263,7 @@
         }
         function terminalTools() {
             return [
-                { type: 'function', function: { name: 'run_terminal_command', description: 'Run a shell command in the open workspace folder. Always asks for your approval first, regardless of the current AI action mode. Use this for adb install/logcat/shell etc. once a device is connected.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
+                { type: 'function', function: { name: 'run_terminal_command', description: 'Run a shell command. Always asks for your approval first, regardless of the current AI action mode. Use this for adb install/logcat/shell, git/gh repo management, etc.', parameters: { type: 'object', properties: { command: { type: 'string' }, directory: { type: 'string', description: 'Absolute path to run the command in. Defaults to the open workspace folder if omitted.' } }, required: ['command'] } } },
             ];
         }
         function deviceTools() {
@@ -1272,11 +1278,11 @@
                 vscode.postMessage({ type: 'fsCall', requestId, op, path, content });
             });
         }
-        function callTerminalAsync(command) {
+        function callTerminalAsync(command, directory) {
             return new Promise((resolve) => {
                 const requestId = uid();
                 terminalPending[requestId] = resolve;
-                vscode.postMessage({ type: 'terminalCall', requestId, command });
+                vscode.postMessage({ type: 'terminalCall', requestId, command, directory });
             });
         }
         function callListDevicesAsync() {
@@ -1355,7 +1361,7 @@
             if (call.name === 'list_directory') return await callFsAsync('list_directory', args.path);
             if (call.name === 'read_file') return await callFsAsync('read_file', args.path);
             if (call.name === 'write_file') return await callFsAsync('write_file', args.path, args.content);
-            if (call.name === 'run_terminal_command') return await callTerminalAsync(args.command);
+            if (call.name === 'run_terminal_command') return await callTerminalAsync(args.command, args.directory);
             if (call.name === 'list_usb_devices') return await callListDevicesAsync();
             if (call.name === 'web_search') return await callWebSearchAsync(args.query);
             if (call.name === 'tor_fetch') return await callTorFetchAsync(args.url);
