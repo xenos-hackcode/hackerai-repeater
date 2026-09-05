@@ -607,6 +607,10 @@
             'decided a command is the right next step, call the tool directly and let the real approval prompt handle confirmation. ' +
             'If the user has already said yes, ok, go ahead, do it, or anything else affirmative to a plan you described, call the tool ' +
             'now instead of describing the plan again -- repeating yourself instead of acting is a bug, not a safe default. ' +
+            'When you report what happened after a tool call, base it strictly on that tool\'s actual result, not on what you expected to ' +
+            'happen -- if the result contains an "error" field or a non-zero exit code, say so plainly (e.g. "that failed: <error>"). ' +
+            'Never describe a failed or errored action as done, successful, or already up to date; a wrong success report is worse than ' +
+            'an honest failure report, because the user will believe it and move on without fixing the real problem. ' +
             'run_terminal_command takes an optional "directory" argument (an absolute path) -- always pass it explicitly when the user ' +
             'is asking about a project other than the one currently open, including for git/gh commands (clone, push, delete a repo, etc.); ' +
             'never assume the currently open folder is the right one for a command about a different named project. ' +
@@ -1666,6 +1670,22 @@
         function logStep(text) { state.chatLog.push({ id: uid(), kind: 'step', text }); saveState(); renderChatLog(); }
         function addChatEntry(entry) { state.chatLog.push(Object.assign({ id: uid() }, entry)); saveState(); renderChatLog(); }
 
+        // A model this small sometimes narrates a tool result loosely instead of staying
+        // grounded in it -- e.g. reporting "already up to date" right after a push actually
+        // failed with "repository not found". Rather than trust the model's own summary,
+        // check the actual JSON the tool returned and flag a mismatch deterministically.
+        function toolResultFailureDetail(toolResult) {
+            if (!toolResult || typeof toolResult !== 'object') return null;
+            if (toolResult.error) return String(toolResult.error);
+            const r = toolResult.result;
+            if (r && typeof r === 'object') {
+                if (r.error) return String(r.error);
+                if (typeof r.exitCode === 'number' && r.exitCode !== 0) return `exit code ${r.exitCode}`;
+                if (typeof r.statusCode === 'number' && r.statusCode >= 400) return `HTTP ${r.statusCode}`;
+            }
+            return null;
+        }
+
         // Shared by Ask (file/terminal tools only) and Agent (everything) -- the only
         // difference between modes is which tools get offered, not this loop itself.
         async function runChatTurn(userText, tools) {
@@ -1676,6 +1696,7 @@
             turnRunning = true;
             stopRequested = false;
             renderSendBtn();
+            let lastFailureDetail = null;
             try {
             let iterations = 0;
             const MAX_TOOL_ITERATIONS = 40; // long enough for a real multi-step task (e.g. attack -> diagnose -> patch -> retest); dangerous actions still always confirm regardless of this cap.
@@ -1728,13 +1749,18 @@
                         try { toolResult = await executeTool(call); } catch (err) { toolResult = { error: err.message }; }
                         logStep(`${call.name} -> ${JSON.stringify(toolResult).slice(0, 200)}`);
                         state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
+                        lastFailureDetail = toolResultFailureDetail(toolResult);
                     }
                     saveState();
                     continue;
                 }
                 setThinking(false);
                 state.agentHistory.push({ role: 'assistant', content: result.content || '' });
-                addChatEntry({ kind: 'assistant', text: result.content || '(no response)' });
+                let finalText = result.content || '(no response)';
+                if (lastFailureDetail && !/\b(error|fail|not found|doesn't exist|does not exist|denied|stopped|timed?\s?out)\b/i.test(finalText)) {
+                    finalText = `⚠ The last action actually reported an error (${lastFailureDetail}) that this reply doesn't mention -- double check before trusting it:\n\n${finalText}`;
+                }
+                addChatEntry({ kind: 'assistant', text: finalText });
                 if (result.promptTokens != null || result.responseTokens != null) {
                     logStep(`${(result.promptTokens || 0) + (result.responseTokens || 0)} tokens used`);
                 }
