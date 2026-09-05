@@ -599,6 +599,10 @@
             'run_terminal_command takes an optional "directory" argument (an absolute path) -- always pass it explicitly when the user ' +
             'is asking about a project other than the one currently open, including for git/gh commands (clone, push, delete a repo, etc.); ' +
             'never assume the currently open folder is the right one for a command about a different named project. ' +
+            'Terminal commands run on Windows through cmd.exe, not bash -- use double quotes for any argument with spaces (e.g. ' +
+            'git commit -m "a message"), never single quotes, since cmd.exe treats a single quote as a plain character and will split ' +
+            'the argument into multiple words instead of one. Put the directory in the "directory" argument itself, never as text ' +
+            'appended to the command (not `git push origin main from C:\\path`, just `git push origin main` with directory set). ' +
             'If you are not sure which file, folder, or target the user means, or an instruction is ambiguous, ask a short clarifying ' +
             'question in plain text instead of guessing and calling a tool -- a wrong guess that runs a command is worse than asking. ' +
             'You can also list Android devices connected over USB (list_usb_devices), and once one is connected, use terminal commands ' +

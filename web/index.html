@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Xenos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0d0f0d; --panel:#14171a; --panel-2:#1c2023; --line:#262b2e;
+    --fg:#d4d9d6; --fg-dim:#7c8a82; --fg-faint:#4b5650;
+    --signal:#00ff9c; --signal-dim:#0a3d2c;
+    --red:#ff2b6d; --cyan:#00d9ff; --accent:#3794ff;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--ink); color:var(--fg); font-family:var(--sans);
+    font-size:16px; line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit}
+  ::selection{background:var(--signal-dim); color:var(--signal)}
+  .wrap{max-width:1080px; margin:0 auto; padding:0 28px}
+  h1,h2,h3{font-family:var(--sans); font-weight:700; text-wrap:balance; letter-spacing:-0.01em}
+  code,.mono{font-family:var(--mono)}
+  .eyebrow{
+    font-family:var(--mono); font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--fg-dim);
+  }
+  .eyebrow::before{content:'// '; color:var(--fg-faint)}
+
+  /* ---------- nav ---------- */
+  .nav{
+    position:sticky; top:0; z-index:10; background:rgba(13,15,13,0.88); backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav .wrap{display:flex; align-items:center; gap:28px; height:56px}
+  .wordmark{
+    font-family:var(--mono); font-weight:600; font-size:17px; letter-spacing:0.02em;
+    color:var(--fg); position:relative; text-decoration:none;
+  }
+  .wordmark::before,.wordmark::after{
+    content:'XENOS'; position:absolute; left:0; top:0; width:100%; overflow:hidden;
+    opacity:0;
+  }
+  .wordmark::before{color:var(--red); animation:glitch1 6s infinite}
+  .wordmark::after{color:var(--cyan); animation:glitch2 6s infinite}
+  @keyframes glitch1{
+    0%,93%,100%{opacity:0; transform:translate(0,0)}
+    94%{opacity:0.75; transform:translate(-2px,1px)}
+    96%{opacity:0.4; transform:translate(1px,0)}
+  }
+  @keyframes glitch2{
+    0%,93.5%,100%{opacity:0; transform:translate(0,0)}
+    94.5%{opacity:0.7; transform:translate(2px,-1px)}
+    96.5%{opacity:0.35; transform:translate(-1px,0)}
+  }
+  @media (prefers-reduced-motion:reduce){.wordmark::before,.wordmark::after{animation:none; display:none}}
+  .nav-links{display:flex; gap:22px; font-size:14px; color:var(--fg-dim); flex:1}
+  .nav-links a{text-decoration:none; padding:4px 0; border-bottom:1px solid transparent}
+  .nav-links a:hover,.nav-links a:focus-visible{color:var(--fg); border-color:var(--fg-faint)}
+  .nav-cta{
+    font-family:var(--mono); font-size:13px; text-decoration:none; color:var(--ink);
+    background:var(--signal); padding:7px 14px; border-radius:3px; font-weight:600;
+    white-space:nowrap;
+  }
+  .nav-cta:hover{filter:brightness(1.1)}
+
+  main{padding-bottom:0}
+  section{padding:88px 0}
+  section+section{border-top:1px solid var(--line)}
+
+  /* ---------- pane chrome (mirrors the extension's own chip/panel language) ---------- */
+  .pane{
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; position:relative;
+  }
+  .pane-tab{
+    position:absolute; top:-11px; left:16px; background:var(--ink); border:1px solid var(--line);
+    border-radius:3px; padding:2px 8px; font-family:var(--mono); font-size:11px;
+    letter-spacing:0.06em; color:var(--fg-dim); text-transform:uppercase;
+  }
+
+  /* ---------- hero ---------- */
+  .hero .wrap{display:grid; grid-template-columns:1fr; gap:44px; padding-top:24px}
+  @media (min-width:900px){.hero .wrap{grid-template-columns:1.05fr 1fr; align-items:start}}
+  .hero h1{font-size:40px; line-height:1.14; margin:14px 0 18px}
+  @media (min-width:640px){.hero h1{font-size:48px}}
+  .hero h1 .hl{color:var(--signal)}
+  .hero p.lede{color:var(--fg-dim); font-size:17px; max-width:52ch; margin-bottom:28px}
+  .cta-row{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px}
+  .btn{
+    display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:14px;
+    font-weight:600; text-decoration:none; padding:11px 18px; border-radius:4px; border:1px solid transparent;
+  }
+  .btn-primary{background:var(--signal); color:var(--ink)}
+  .btn-primary:hover{filter:brightness(1.1)}
+  .btn-ghost{border-color:var(--line); color:var(--fg)}
+  .btn-ghost:hover{border-color:var(--fg-faint); background:var(--panel)}
+  .fineprint{font-size:13px; color:var(--fg-faint)}
+  .fineprint a{color:var(--accent); text-decoration:none}
+  .fineprint a:hover{text-decoration:underline}
+
+  .capture{padding:30px 18px 20px; overflow-x:auto}
+  .capture pre{font-family:var(--mono); font-size:12.5px; line-height:1.7; white-space:pre; color:var(--fg-dim)}
+  .capture .req{color:var(--cyan)}
+  .capture .key{color:var(--fg-faint)}
+  .capture .call{color:var(--signal)}
+  .capture .wait{color:#e0a94e}
+  .capture .ok{color:var(--signal)}
+  .capture .say{color:var(--fg)}
+  .capture .tag{color:var(--fg-faint)}
+
+  /* ---------- modes ---------- */
+  .section-head{margin-bottom:40px; max-width:62ch}
+  .section-head h2{font-size:29px; margin-top:10px}
+  .section-head p{color:var(--fg-dim); margin-top:10px; font-size:15.5px}
+  .modes-grid{display:grid; grid-template-columns:1fr; gap:18px}
+  @media (min-width:760px){.modes-grid{grid-template-columns:1fr 1fr}}
+  .mode-card{padding:26px 24px 24px}
+  .mode-card .mode-name{font-family:var(--mono); font-size:13px; letter-spacing:0.08em; text-transform:uppercase}
+  .mode-card.ask .mode-name{color:var(--accent)}
+  .mode-card.agent .mode-name{color:var(--red)}
+  .mode-card h3{font-size:21px; margin:8px 0 10px}
+  .mode-card p{color:var(--fg-dim); font-size:14.5px; margin-bottom:16px}
+  .pill-row{display:flex; flex-wrap:wrap; gap:7px}
+  .pill{
+    font-family:var(--mono); font-size:12px; color:var(--fg-dim); border:1px solid var(--line);
+    border-radius:20px; padding:4px 11px; background:var(--panel-2);
+  }
+  .action-mode{margin-top:34px; padding:20px 22px; display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap}
+  .action-mode .num{
+    font-family:var(--mono); font-size:20px; color:var(--fg-faint); border:1px solid var(--line);
+    border-radius:4px; width:34px; height:34px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .action-mode p{color:var(--fg-dim); font-size:14.5px}
+  .action-mode strong{color:var(--fg)}
+
+  /* ---------- tools ---------- */
+  .tool-groups{display:grid; grid-template-columns:1fr; gap:16px}
+  @media (min-width:700px){.tool-groups{grid-template-columns:1fr 1fr}}
+  .tool-group{padding:20px 22px}
+  .tool-group h3{
+    font-family:var(--mono); font-size:12.5px; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--fg-dim); margin-bottom:14px; font-weight:600;
+  }
+  .tool-list{display:flex; flex-direction:column; gap:9px}
+  .tool-row{display:flex; gap:10px; align-items:baseline; font-size:14px}
+  .tool-row code{color:var(--signal); font-size:13.5px; flex-shrink:0}
+  .tool-row span{color:var(--fg-dim)}
+
+  /* ---------- safety ---------- */
+  .safety-pane{padding:34px 30px; display:grid; gap:26px}
+  @media (min-width:760px){.safety-pane{grid-template-columns:1fr 1fr}}
+  .rule{border-left:2px solid var(--red); padding-left:18px}
+  .rule .eyebrow{color:var(--red)}
+  .rule p{margin-top:10px; font-size:15px; color:var(--fg)}
+  .rule p .mono{color:var(--fg-dim); font-size:14px}
+
+  /* ---------- spec strip ---------- */
+  .spec-strip{display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden}
+  @media (min-width:760px){.spec-strip{grid-template-columns:repeat(3,1fr)}}
+  .spec-cell{background:var(--panel); padding:22px 22px}
+  .spec-cell .label{font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--fg-faint)}
+  .spec-cell .val{font-family:var(--mono); font-size:19px; margin-top:8px; font-variant-numeric:tabular-nums; color:var(--fg)}
+
+  /* ---------- waitlist ---------- */
+  .waitlist-pane{padding:38px; max-width:640px; margin:0 auto}
+  .waitlist-pane h2{font-size:26px; margin:10px 0 10px}
+  .waitlist-pane > p{color:var(--fg-dim); font-size:15px; margin-bottom:26px; max-width:56ch}
+  form{display:flex; flex-direction:column; gap:12px}
+  label{font-family:var(--mono); font-size:12px; letter-spacing:0.05em; color:var(--fg-dim); text-transform:uppercase}
+  input[type=email],textarea{
+    width:100%; background:var(--panel-2); border:1px solid var(--line); border-radius:4px;
+    color:var(--fg); font-family:var(--sans); font-size:15px; padding:11px 13px;
+  }
+  textarea{resize:vertical; min-height:64px; font-family:var(--sans)}
+  input:focus-visible,textarea:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .field{display:flex; flex-direction:column; gap:6px}
+  .submit-row{display:flex; align-items:center; gap:14px; margin-top:4px; flex-wrap:wrap}
+  button.btn-primary{border:none; cursor:pointer; font-size:14px}
+  .form-note{font-size:12.5px; color:var(--fg-faint)}
+  .success{
+    display:none; align-items:center; gap:10px; padding:13px 16px; border:1px solid var(--signal);
+    border-radius:4px; background:var(--signal-dim); color:var(--signal); font-size:14px; margin-top:6px;
+  }
+  .success.show{display:flex}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line); padding:34px 0}
+  .foot-row{display:flex; flex-wrap:wrap; justify-content:space-between; gap:18px; align-items:center}
+  .prompt-line{font-family:var(--mono); font-size:13.5px; color:var(--fg-dim)}
+  .prompt-line .p1{color:var(--signal)}
+  .foot-links{display:flex; gap:18px; font-size:13.5px; color:var(--fg-dim)}
+  .foot-links a{text-decoration:none}
+  .foot-links a:hover{color:var(--fg)}
+  .foot-bottom{margin-top:20px; font-size:12.5px; color:var(--fg-faint)}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="wordmark" href="#top">XENOS</a>
+    <nav class="nav-links">
+      <a href="#modes">Modes</a>
+      <a href="#tools">Tools</a>
+      <a href="#safety">Safety</a>
+      <a href="#spec">Model</a>
+    </nav>
+    <a class="nav-cta" href="#waitlist">API waitlist</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero" id="top">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow">HackerAI Repeater — VS Code extension</span>
+        <h1>An HTTP repeater with an agent that can <span class="hl">actually run your terminal.</span></h1>
+        <p class="lede">Xenos is a security-tuned local model wired straight into a Burp-style repeater for VS Code. Ask it a question, or let it act: set headers, fire requests, read and write files, run shell commands, reach through Tor — everything destructive still stops and asks first.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://open-vsx.org/extension/hackerai/hackerai-repeater">Install from Open VSX</a>
+          <a class="btn btn-ghost" href="#waitlist">Join the API waitlist</a>
+        </div>
+        <p class="fineprint">Free and MIT-licensed. Source on <a href="https://github.com/xenos-hackcode/hackerai-repeater">GitHub</a>.</p>
+      </div>
+      <div class="pane capture">
+        <span class="pane-tab">agent mode</span>
+        <pre><span class="req">POST /api/chat</span>  <span class="key">model=</span>xenos:latest
+
+<span class="say">you  </span> check 10.0.0.4 for anything obviously wrong
+
+<span class="call">→ run_terminal_command</span>("nmap -sV 10.0.0.4")
+<span class="wait">  ⏸ waiting for your approval…</span>
+<span class="ok">  ✓ approved</span>
+
+  135/tcp open  msrpc
+  445/tcp open  microsoft-ds
+
+<span class="say">xenos</span> 445 is exposed — that's SMB. Want me to
+       check it for EternalBlue before we go further?</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="modes" id="modes">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">How you drive it</span>
+        <h2>Two ways to work, one toggle.</h2>
+        <p>Ask keeps it close to a pair-programmer. Agent hands it the whole belt. Both remember the conversation; only the tool list changes.</p>
+      </div>
+      <div class="modes-grid">
+        <div class="pane mode-card ask">
+          <span class="mode-name">Ask</span>
+          <h3>Chat, plus files and a terminal</h3>
+          <p>Once you authorize it, Ask can read and write files and run shell commands — the command still has to clear your approval first. No HTTP repeater or network tools here.</p>
+          <div class="pill-row">
+            <span class="pill">read_file</span>
+            <span class="pill">write_file</span>
+            <span class="pill">run_terminal_command</span>
+            <span class="pill">list_usb_devices</span>
+          </div>
+        </div>
+        <div class="pane mode-card agent">
+          <span class="mode-name">Agent</span>
+          <h3>The full tool belt</h3>
+          <p>Everything Ask has, plus the repeater itself — setting and firing requests — and reach outward: live APIs, the open web, Tor.</p>
+          <div class="pill-row">
+            <span class="pill">send_request</span>
+            <span class="pill">api_fetch</span>
+            <span class="pill">tor_fetch</span>
+            <span class="pill">web_search</span>
+            <span class="pill">+ everything in Ask</span>
+          </div>
+        </div>
+      </div>
+      <div class="pane action-mode">
+        <span class="num mono">#</span>
+        <p><strong>Manual or Automated</strong> — the same toggle sets how often it stops to ask. Manual confirms every action; Automated only interrupts for the ones in the rule below. Either way, mid-task you can type a new instruction — Xenos folds it in at the next step — or hit Stop to kill the current command or generation outright.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tools" id="tools">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">What it can reach</span>
+        <h2>Eleven tools, four jobs.</h2>
+      </div>
+      <div class="tool-groups">
+        <div class="pane tool-group">
+          <h3>Repeater</h3>
+          <div class="tool-list">
+            <div class="tool-row"><code>set_url</code><span>version a target URL</span></div>
+            <div class="tool-row"><code>set_headers</code><span>version request headers</span></div>
+            <div class="tool-row"><code>set_body</code><span>version the request body</span></div>
+            <div class="tool-row"><code>send_request</code><span>fire the configured request</span></div>
+          </div>
+        </div>
+        <div class="pane tool-group">
+          <h3>Filesystem &amp; system</h3>
+          <div class="tool-list">
+            <div class="tool-row"><code>read_file</code><span>read inside the workspace</span></div>
+            <div class="tool-row"><code>write_file</code><span>create or overwrite a file</span></div>
+            <div class="tool-row"><code>run_terminal_command</code><span>any directory, always confirmed</span></div>
+            <div class="tool-row"><code>list_usb_devices</code><span>adb devices, for Android work</span></div>
+          </div>
+        </div>
+        <div class="pane tool-group">
+          <h3>Reach out</h3>
+          <div class="tool-list">
+            <div class="tool-row"><code>api_fetch</code><span>call any real HTTP/HTTPS API</span></div>
+            <div class="tool-row"><code>web_search</code><span>DuckDuckGo, no key needed</span></div>
+            <div class="tool-row"><code>wikipedia_search</code><span>free, no key needed</span></div>
+          </div>
+        </div>
+        <div class="pane tool-group">
+          <h3>Stay covert</h3>
+          <div class="tool-list">
+            <div class="tool-row"><code>tor_fetch</code><span>.onion or clearnet, over local SOCKS</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="safety" id="safety">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">The one rule that never toggles off</span>
+        <h2>It always asks before it can hurt something.</h2>
+      </div>
+      <div class="pane safety-pane">
+        <div class="rule">
+          <span class="eyebrow">Confirm, no exceptions</span>
+          <p><span class="mono">run_terminal_command</span> and <span class="mono">tor_fetch</span> stop and wait for your OK every single time — Manual or Automated mode, doesn't matter. Nothing runs a shell command or reaches through Tor without you clicking approve.</p>
+        </div>
+        <div class="rule">
+          <span class="eyebrow">A real kill switch</span>
+          <p>Stop doesn't just ask the model to be polite about it — it kills the running terminal process or the in-flight generation outright, and denies anything still waiting for approval. Say "continue" after and it picks the task back up, checking what actually happened first.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec" id="spec">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Under the hood</span>
+        <h2>A small model, run entirely on your machine.</h2>
+        <p>No API calls leave your computer unless a tool call does it on purpose.</p>
+      </div>
+      <div class="spec-strip">
+        <div class="spec-cell"><div class="label">Base model</div><div class="val">Qwen2.5-7B-Instruct</div></div>
+        <div class="spec-cell"><div class="label">Fine-tune</div><div class="val">QLoRA</div></div>
+        <div class="spec-cell"><div class="label">Quantization</div><div class="val">Q4_K_M · GGUF</div></div>
+        <div class="spec-cell"><div class="label">Context window</div><div class="val">32,768 tokens</div></div>
+        <div class="spec-cell"><div class="label">Training pairs</div><div class="val">~110,000</div></div>
+        <div class="spec-cell"><div class="label">Served via</div><div class="val">Ollama · 127.0.0.1</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="waitlist" id="waitlist">
+    <div class="wrap">
+      <div class="pane waitlist-pane">
+        <span class="eyebrow">Coming next</span>
+        <h2>A hosted Xenos, with real API keys.</h2>
+        <p>Right now Xenos only runs locally, through Ollama, on whatever machine has the extension installed. We're building a hosted version so you can call the same tools — <span class="mono">api_fetch</span> and the rest — over a real API key, without keeping a GPU running yourself. Leave your email and we'll reach out when keys open up.</p>
+        <form id="waitlist-form">
+          <div class="field">
+            <label for="wl-email">Email</label>
+            <input type="email" id="wl-email" name="email" placeholder="you@domain.com" required>
+          </div>
+          <div class="field">
+            <label for="wl-use">What would you build with it? (optional)</label>
+            <textarea id="wl-use" name="use" placeholder="e.g. wiring api_fetch into a recon pipeline"></textarea>
+          </div>
+          <div class="submit-row">
+            <button class="btn btn-primary" type="submit">Request early access</button>
+            <span class="form-note">No live backend yet — see the note below.</span>
+          </div>
+          <div class="success" id="wl-success">✓ Saved on this device. We'll post real signup once the API ships.</div>
+        </form>
+        <p class="fineprint" style="margin-top:18px">This form has nowhere to send your email yet — it just confirms locally, in your browser, that you're interested. The real channel for now is the <a href="https://github.com/xenos-hackcode/hackerai-repeater">GitHub repo</a> — star it or open an issue and you'll hear about the API first.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-row">
+      <div class="prompt-line"><span class="p1">$</span> code --install-extension hackerai.hackerai-repeater</div>
+      <div class="foot-links">
+        <a href="https://github.com/xenos-hackcode/hackerai-repeater">GitHub</a>
+        <a href="https://open-vsx.org/extension/hackerai/hackerai-repeater">Open VSX</a>
+        <a href="https://github.com/xenos-hackcode/hackerai-repeater/blob/master/LICENSE">MIT License</a>
+      </div>
+    </div>
+    <p class="foot-bottom">Built for authorized security testing. Only point it at systems you own or have permission to test.</p>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var form = document.getElementById('waitlist-form');
+    var success = document.getElementById('wl-success');
+    var STORE = 'xenosWaitlistLocal';
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var email = document.getElementById('wl-email').value.trim();
+      var use = document.getElementById('wl-use').value.trim();
+      if (!email) return;
+      try {
+        var list = JSON.parse(localStorage.getItem(STORE) || '[]');
+        list.push({ email: email, use: use, at: new Date().toISOString() });
+        localStorage.setItem(STORE, JSON.stringify(list));
+      } catch (err) {}
+      success.classList.add('show');
+      form.querySelector('button[type=submit]').textContent = 'Request sent';
+      form.querySelector('button[type=submit]').disabled = true;
+    });
+  })();
+</script>
+</body>
+</html>
