@@ -589,6 +589,9 @@
             'terminal commands (terminal commands always need explicit user approval first, regardless of mode). ' +
             'You can also list Android devices connected over USB (list_usb_devices), and once one is connected, use terminal commands ' +
             'like "adb install", "adb logcat -d", or "adb shell" for Kotlin/Android development tasks. ' +
+            'You can search the web (web_search, DuckDuckGo instant-answer results -- limited, not full search), search Wikipedia ' +
+            '(wikipedia_search, free), and fetch a URL including .onion addresses through a locally running Tor proxy (tor_fetch, ' +
+            'always asks for approval first). ' +
             'Keep your own working notes, plans, and context in a "hacker" folder at the workspace root (e.g. hacker/NOTES.md), the way ' +
             'Claude Code keeps a .claude folder. Only act on targets and files the user has authorized. Keep replies concise.';
 
@@ -628,6 +631,9 @@
         let fsPending = {};        // requestId -> resolve
         let terminalPending = {};  // requestId -> resolve
         let listDevicesPending = {}; // requestId -> resolve
+        let webSearchPending = {};  // requestId -> resolve
+        let torFetchPending = {};   // requestId -> resolve
+        let wikipediaPending = {};  // requestId -> resolve
         let pendingConfirms = {};  // confirm entry id -> resolve(approved)
 
         function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -1150,6 +1156,18 @@
                 const resolve = listDevicesPending[msg.requestId];
                 if (resolve) { delete listDevicesPending[msg.requestId]; resolve(msg.data); }
 
+            } else if (msg.type === 'webSearchResult') {
+                const resolve = webSearchPending[msg.requestId];
+                if (resolve) { delete webSearchPending[msg.requestId]; resolve(msg.data); }
+
+            } else if (msg.type === 'torFetchResult') {
+                const resolve = torFetchPending[msg.requestId];
+                if (resolve) { delete torFetchPending[msg.requestId]; resolve(msg.data); }
+
+            } else if (msg.type === 'wikipediaResult') {
+                const resolve = wikipediaPending[msg.requestId];
+                if (resolve) { delete wikipediaPending[msg.requestId]; resolve(msg.data); }
+
             } else if (msg.type === 'loadRequest') {
                 loadRawRequest(msg.data);
             }
@@ -1217,6 +1235,9 @@
                 { type: 'function', function: { name: 'set_headers', description: 'Set request headers for the next HTTP request.', parameters: { type: 'object', properties: { headers: { type: 'array', items: { type: 'string' } } }, required: ['headers'] } } },
                 { type: 'function', function: { name: 'set_body', description: 'Set the request body for the next HTTP request.', parameters: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] } } },
                 { type: 'function', function: { name: 'send_request', description: 'Send the currently configured HTTP request(s) using the active URL/headers/body, and return status/bytes for each.', parameters: { type: 'object', properties: { method: { type: 'string', description: 'HTTP method, defaults to the method selected in Tools.' } } } } },
+                { type: 'function', function: { name: 'web_search', description: 'Search the web (DuckDuckGo instant-answer results -- limited, not full search results).', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
+                { type: 'function', function: { name: 'tor_fetch', description: 'Fetch a URL (including .onion addresses) through a locally running Tor SOCKS proxy on 127.0.0.1:9050.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
+                { type: 'function', function: { name: 'wikipedia_search', description: 'Search Wikipedia (free, no key needed) and return matching article titles, URLs, and snippets.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
             ];
         }
         function pluginTools() {
@@ -1265,6 +1286,27 @@
                 vscode.postMessage({ type: 'listDevicesCall', requestId });
             });
         }
+        function callWebSearchAsync(query) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                webSearchPending[requestId] = resolve;
+                vscode.postMessage({ type: 'webSearchCall', requestId, query });
+            });
+        }
+        function callTorFetchAsync(url) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                torFetchPending[requestId] = resolve;
+                vscode.postMessage({ type: 'torFetchCall', requestId, url });
+            });
+        }
+        function callWikipediaAsync(query) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                wikipediaPending[requestId] = resolve;
+                vscode.postMessage({ type: 'wikipediaCall', requestId, query });
+            });
+        }
         // Confirmation gate: renders an Accept/Deny chat entry and waits for the user's click.
         function requestConfirm(call) {
             return new Promise((resolve) => {
@@ -1305,6 +1347,9 @@
             if (call.name === 'write_file') return await callFsAsync('write_file', args.path, args.content);
             if (call.name === 'run_terminal_command') return await callTerminalAsync(args.command);
             if (call.name === 'list_usb_devices') return await callListDevicesAsync();
+            if (call.name === 'web_search') return await callWebSearchAsync(args.query);
+            if (call.name === 'tor_fetch') return await callTorFetchAsync(args.url);
+            if (call.name === 'wikipedia_search') return await callWikipediaAsync(args.query);
             if (call.name.startsWith('plugin_')) {
                 const chip = state.activeChipId.plugins ? findChip(state.activeChipId.plugins) : null;
                 const plugin = chip && chip.items.find(p => 'plugin_' + slug(p.name) === call.name);
@@ -1341,7 +1386,7 @@
                         tool_calls: result.toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } })),
                     });
                     for (const call of result.toolCalls) {
-                        const needsConfirm = state.confirmMode === 'manual' || call.name === 'run_terminal_command';
+                        const needsConfirm = state.confirmMode === 'manual' || call.name === 'run_terminal_command' || call.name === 'tor_fetch';
                         if (needsConfirm) {
                             const approved = await requestConfirm(call);
                             if (!approved) {

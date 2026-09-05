@@ -4,6 +4,8 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const { exec } = require('child_process');
+const net = require('net');
+const tls = require('tls');
 
 let activeView = null; // the current webviewView (docked panel tab), if resolved
 
@@ -41,6 +43,15 @@ class RepeaterViewProvider {
                     break;
                 case 'listDevicesCall':
                     await handleListDevices(message, webviewView);
+                    break;
+                case 'webSearchCall':
+                    await handleWebSearch(message, webviewView);
+                    break;
+                case 'torFetchCall':
+                    await handleTorFetch(message, webviewView);
+                    break;
+                case 'wikipediaCall':
+                    await handleWikipediaSearch(message, webviewView);
                     break;
                 case 'log':
                     console.log('[Repeater]', message.text);
@@ -183,6 +194,134 @@ function handleListDevices(message, panel) {
         }
         panel.webview.postMessage({ type: 'listDevicesResult', requestId, data: { result: parseAdbDevices(stdout) } });
     });
+}
+
+// DuckDuckGo's only public, keyless endpoint is the Instant Answer API -- infoboxes and
+// related topics, not full web results. Honest limitation, not a full search replacement.
+async function handleWebSearch(message, panel) {
+    const { requestId, query } = message;
+    try {
+        const data = await getJSON(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, {});
+        const parsed = JSON.parse(data);
+        const results = [];
+        if (parsed.AbstractText) results.push({ title: parsed.Heading, url: parsed.AbstractURL, description: parsed.AbstractText });
+        (parsed.RelatedTopics || []).forEach(t => {
+            if (t.Text && t.FirstURL) results.push({ title: t.Text, url: t.FirstURL });
+        });
+        panel.webview.postMessage({
+            type: 'webSearchResult', requestId,
+            data: { result: { provider: 'duckduckgo-instant-answer (limited, not full web search)', results: results.slice(0, 8) } },
+        });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'webSearchResult', requestId, data: { error: err.message } });
+    }
+}
+
+// Wikipedia's search API is free and keyless -- no signup, unlike Google/Brave.
+async function handleWikipediaSearch(message, panel) {
+    const { requestId, query } = message;
+    try {
+        const data = await getJSON(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=5`, { 'User-Agent': 'HackerAI-Repeater/1.0' });
+        const parsed = JSON.parse(data);
+        const results = ((parsed.query && parsed.query.search) || []).map(r => ({
+            title: r.title,
+            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`,
+            snippet: r.snippet.replace(/<[^>]+>/g, ''),
+        }));
+        panel.webview.postMessage({ type: 'wikipediaResult', requestId, data: { result: results } });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'wikipediaResult', requestId, data: { error: err.message } });
+    }
+}
+
+// Minimal hand-rolled SOCKS5 CONNECT client (no-auth) -- enough to tunnel a single
+// request through a locally running Tor client's SOCKS proxy (default 127.0.0.1:9050).
+function socksConnect(proxyHost, proxyPort, targetHost, targetPort) {
+    return new Promise((resolve, reject) => {
+        const socket = net.connect(proxyPort, proxyHost, () => {
+            socket.write(Buffer.from([0x05, 0x01, 0x00]));
+        });
+        let stage = 0;
+        socket.on('error', reject);
+        socket.on('data', (data) => {
+            if (stage === 0) {
+                if (data[0] !== 0x05 || data[1] !== 0x00) {
+                    socket.destroy();
+                    reject(new Error(`SOCKS5 handshake failed -- is Tor running on ${proxyHost}:${proxyPort}?`));
+                    return;
+                }
+                const hostBuf = Buffer.from(targetHost, 'utf8');
+                socket.write(Buffer.concat([
+                    Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]),
+                    hostBuf,
+                    Buffer.from([targetPort >> 8, targetPort & 0xff]),
+                ]));
+                stage = 1;
+            } else if (stage === 1) {
+                if (data[1] !== 0x00) {
+                    socket.destroy();
+                    reject(new Error(`SOCKS5 CONNECT failed (code ${data[1]}) -- target unreachable via Tor.`));
+                    return;
+                }
+                stage = 2;
+                resolve(socket);
+            }
+        });
+    });
+}
+
+function torFetch(urlStr, proxyHost, proxyPort, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        let parsedUrl;
+        try { parsedUrl = new URL(urlStr); } catch (err) { reject(new Error(`Invalid URL: ${urlStr}`)); return; }
+        const isHttps = parsedUrl.protocol === 'https:';
+        const targetPort = parsedUrl.port ? parseInt(parsedUrl.port) : (isHttps ? 443 : 80);
+
+        socksConnect(proxyHost, proxyPort, parsedUrl.hostname, targetPort).then((rawSocket) => {
+            rawSocket.setTimeout(timeoutMs || 30000, () => { rawSocket.destroy(); reject(new Error('Tor fetch timed out')); });
+
+            const sendRequestOver = (sock) => {
+                let data = Buffer.alloc(0);
+                sock.on('data', chunk => { data = Buffer.concat([data, chunk]); });
+                sock.on('end', () => {
+                    const raw = data.toString('utf8');
+                    const sepIdx = raw.indexOf('\r\n\r\n');
+                    const headerPart = sepIdx >= 0 ? raw.slice(0, sepIdx) : raw;
+                    const bodyPart = sepIdx >= 0 ? raw.slice(sepIdx + 4) : '';
+                    const statusMatch = (headerPart.split('\r\n')[0] || '').match(/HTTP\/\d\.\d (\d+)/);
+                    resolve({ statusCode: statusMatch ? parseInt(statusMatch[1]) : 0, body: bodyPart.slice(0, 50000) });
+                });
+                sock.on('error', reject);
+                sock.write([
+                    `GET ${parsedUrl.pathname + parsedUrl.search || '/'} HTTP/1.1`,
+                    `Host: ${parsedUrl.hostname}`,
+                    'User-Agent: Mozilla/5.0',
+                    'Connection: close',
+                    '', '',
+                ].join('\r\n'));
+            };
+
+            if (isHttps) {
+                const tlsSocket = tls.connect({ socket: rawSocket, servername: parsedUrl.hostname, rejectUnauthorized: false }, () => sendRequestOver(tlsSocket));
+                tlsSocket.on('error', reject);
+            } else {
+                sendRequestOver(rawSocket);
+            }
+        }).catch(reject);
+    });
+}
+
+async function handleTorFetch(message, panel) {
+    const { requestId, url } = message;
+    try {
+        const result = await torFetch(url, '127.0.0.1', 9050, 30000);
+        panel.webview.postMessage({ type: 'torFetchResult', requestId, data: { result } });
+    } catch (err) {
+        panel.webview.postMessage({
+            type: 'torFetchResult', requestId,
+            data: { error: `${err.message} Make sure Tor (Tor Browser or the tor service) is running locally with its SOCKS proxy on 127.0.0.1:9050.` },
+        });
+    }
 }
 
 async function handleSendRequest(message, panel) {
