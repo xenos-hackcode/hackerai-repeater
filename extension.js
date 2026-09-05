@@ -592,7 +592,7 @@ async function callLLM(messages, tools, apiConfig, localModel, requestId) {
             messages,
             tools: tools && tools.length ? tools : undefined,
             stream: false,
-        }, 180000, requestId ? (req) => { pendingLLMRequests[requestId] = req; } : undefined).catch(err => {
+        }, 600000, requestId ? (req) => { pendingLLMRequests[requestId] = req; } : undefined).catch(err => {
             throw new Error(`Could not reach Ollama at localhost:11434 (${err.message}). Make sure Ollama is running and the model is loaded.`);
         });
         const msg = data.message || {};

@@ -1016,6 +1016,14 @@
             renderChatLog();
             hideTasksMenu();
         }
+        // Rough size check so a handful of huge tool outputs (a verbose git/npm command,
+        // a big file read) triggers compaction even while the message COUNT stays low --
+        // large context is what actually slows a CPU-bound model down turn to turn.
+        function estimateHistoryChars() {
+            return state.agentHistory.reduce((sum, m) => {
+                return sum + (m.content ? m.content.length : 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0);
+            }, 0);
+        }
         // Summarizes the LLM history via the model itself and replaces it with the summary,
         // so a long task doesn't either silently lose context or blow past a small local
         // model's context window. Falls back to a hard trim only if summarizing fails.
@@ -1626,7 +1634,7 @@
             addChatEntry({ kind: 'user', text: userText });
             state.agentHistory.push({ role: 'user', content: userText });
             setThinking(true);
-            if (state.agentHistory.length > 24) await compactAgentHistory(true);
+            if (state.agentHistory.length > 24 || estimateHistoryChars() > 20000) await compactAgentHistory(true);
             turnRunning = true;
             stopRequested = false;
             renderSendBtn();
