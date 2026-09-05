@@ -2,7 +2,7 @@
   "name": "hackerai-repeater",
   "displayName": "HackerAI Repeater",
   "description": "HTTP request builder and repeater — Burp Repeater inside VS Code",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "publisher": "hackerai",
   "engines": {
     "vscode": "^1.85.0"

@@ -219,7 +219,11 @@
             padding: 8px 10px;
             font-size: 12px;
         }
-        .confirm-label { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; margin-bottom: 6px; word-break: break-word; }
+        .confirm-label { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; margin-bottom: 6px; word-break: break-word; font-weight: 600; }
+        .confirm-fields { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+        .confirm-field { display: flex; gap: 6px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; word-break: break-word; }
+        .confirm-field-key { color: var(--fg-dim); flex-shrink: 0; }
+        .confirm-field-val { color: var(--fg); white-space: pre-wrap; }
         .confirm-actions { display: flex; gap: 6px; }
         .confirm-status { font-size: 11px; font-weight: 600; }
         .confirm-status.approved { color: var(--green); }
@@ -717,12 +721,16 @@
                 else if (entry.kind === 'confirm') chatLogEl.appendChild(renderConfirmEntry(entry));
                 else if (entry.kind === 'user' || entry.kind === 'assistant') chatLogEl.appendChild(renderMsg(entry));
             });
-            // A one-click Yes/No for whenever the last thing Xenos said ends in a question --
+            // A one-click reply for whenever the last thing Xenos said ends in a question --
             // most often "which one did you mean" style disambiguation now that it's told not
-            // to ask permission for actions the approval prompt already gates.
+            // to ask permission for actions the approval prompt already gates. A "casino,
+            // webrtc, or hackerai-repeater?" style question gets one button per option; any
+            // other question just gets a plain Yes/No.
             const lastEntry = visible[visible.length - 1];
-            if (!turnRunning && lastEntry && lastEntry.kind === 'assistant' && /\?\s*$/.test(lastEntry.text || '')) {
-                chatLogEl.appendChild(renderQuickReplies());
+            if (!turnRunning && lastEntry && lastEntry.kind === 'assistant') {
+                const text = lastEntry.text || '';
+                const options = detectQuickReplyOptions(text) || (/\?\s*$/.test(text) ? ['Yes', 'No'] : null);
+                if (options) chatLogEl.appendChild(renderQuickReplies(options));
             }
             if (thinking) {
                 const row = document.createElement('div');
@@ -803,14 +811,32 @@
             row.appendChild(bubble);
             return row;
         }
-        function renderQuickReplies() {
+        // Looks for a short "X, Y, or Z?" style list at the end of a question (optionally
+        // after a colon, e.g. "which project did you mean: casino, webrtc, or hackerai-repeater?").
+        // Deliberately conservative: only fires on 2-4 short, mostly-single-word options, so it
+        // doesn't misfire on an ordinary sentence that happens to contain "or" and a comma.
+        function detectQuickReplyOptions(text) {
+            const trimmed = (text || '').trim();
+            if (!trimmed.endsWith('?')) return null;
+            const withoutQ = trimmed.slice(0, -1);
+            // Anchored to the END of the sentence so a leading clause ("Should I use ...")
+            // never pollutes the first option -- only a trailing run of short, space-free,
+            // comma/or-separated tokens counts as a detected list.
+            const m = withoutQ.match(/([\w.\/-]+(?:\s*,\s*[\w.\/-]+)*\s*,?\s+or\s+[\w.\/-]+)\s*$/i);
+            if (!m) return null;
+            const parts = m[1].split(/\s*,\s*or\s+|\s*,\s*|\s+or\s+/i).map(s => s.trim()).filter(Boolean);
+            if (parts.length < 2 || parts.length > 4) return null;
+            if (parts.some(p => p.length > 30)) return null;
+            return parts;
+        }
+        function renderQuickReplies(options) {
             const row = document.createElement('div');
             row.className = 'quick-reply-row';
-            ['Yes', 'No'].forEach(label => {
+            options.forEach(label => {
                 const btn = document.createElement('button');
                 btn.className = 'quick-reply-btn';
                 btn.textContent = label;
-                btn.addEventListener('click', () => sendUserText(label + '.'));
+                btn.addEventListener('click', () => sendUserText(/[.?!]$/.test(label) ? label : label + '.'));
                 row.appendChild(btn);
             });
             return row;
@@ -856,13 +882,40 @@
             return div;
         }
 
+        function fieldLabel(key) { return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '); }
         function renderConfirmEntry(entry) {
             const div = document.createElement('div');
             div.className = 'confirm-entry';
             const label = document.createElement('div');
             label.className = 'confirm-label';
-            label.textContent = `${entry.name}(${entry.args})`;
+            label.textContent = entry.name;
             div.appendChild(label);
+
+            const fields = document.createElement('div');
+            fields.className = 'confirm-fields';
+            const argsObj = entry.argsObj;
+            const keys = argsObj && typeof argsObj === 'object' ? Object.keys(argsObj) : [];
+            if (keys.length) {
+                keys.forEach(key => {
+                    const row = document.createElement('div');
+                    row.className = 'confirm-field';
+                    const k = document.createElement('span');
+                    k.className = 'confirm-field-key';
+                    k.textContent = fieldLabel(key) + ':';
+                    const v = document.createElement('span');
+                    v.className = 'confirm-field-val';
+                    const val = argsObj[key];
+                    v.textContent = typeof val === 'string' ? val : JSON.stringify(val);
+                    row.appendChild(k); row.appendChild(v);
+                    fields.appendChild(row);
+                });
+            } else {
+                const row = document.createElement('div');
+                row.className = 'confirm-field-val';
+                row.textContent = entry.args && entry.args !== '{}' ? entry.args : '(no arguments)';
+                fields.appendChild(row);
+            }
+            div.appendChild(fields);
             if (entry.resolved) {
                 const status = document.createElement('div');
                 status.className = entry.approved ? 'confirm-status approved' : 'confirm-status denied';
@@ -1610,7 +1663,7 @@
         function requestConfirm(call) {
             return new Promise((resolve) => {
                 const id = uid();
-                addChatEntry({ kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), resolved: false });
+                addChatEntry({ kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), argsObj: parseToolArgs(call.arguments), resolved: false });
                 pendingConfirms[id] = (approved) => {
                     const entry = state.chatLog.find(e => e.id === id);
                     if (entry) { entry.resolved = true; entry.approved = approved; saveState(); renderChatLog(); }
