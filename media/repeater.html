@@ -320,6 +320,7 @@
             display: flex; align-items: center; gap: 5px;
         }
         .text-btn:hover { border-color: var(--accent); }
+        .text-btn.hidden { display: none; }
         .text-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         .text-btn.primary:hover { filter: brightness(1.15); }
         .text-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -423,6 +424,7 @@
                 <div class="builder-tags" id="builderTags"></div>
                 <div class="builder-row" id="builderRow"></div>
                 <div class="builder-actions">
+                    <button class="text-btn hidden" id="builderResetBtn">Reset to default</button>
                     <button class="text-btn" id="builderCancelBtn">
                         <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
                         Cancel
@@ -521,6 +523,7 @@
         const builderRow = document.getElementById('builderRow');
         const builderOkBtn = document.getElementById('builderOkBtn');
         const builderCancelBtn = document.getElementById('builderCancelBtn');
+        const builderResetBtn = document.getElementById('builderResetBtn');
         const inputBar = document.getElementById('inputBar');
         const chatInput = document.getElementById('chatInput');
         const plusBtn = document.getElementById('plusBtn');
@@ -862,12 +865,16 @@
             }
             builder = { type, chipId, items };
             builderLabel.textContent = BUILDER_META[type].label + (chipId ? ` (editing v${findChip(chipId).version})` : '');
+            builderResetBtn.classList.toggle('hidden', type !== 'prompt');
             renderBuilderTags();
             renderBuilderRow();
             inputBar.hidden = true;
             hideCommandMenu();
             builderBar.hidden = false;
         }
+        builderResetBtn.addEventListener('click', () => {
+            if (promptTextarea) promptTextarea.value = DEFAULT_SYSTEM_PROMPT;
+        });
         function closeBuilder() {
             builder = null;
             builderBar.hidden = true;
