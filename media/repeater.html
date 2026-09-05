@@ -590,6 +590,8 @@
             'run_terminal_command takes an optional "directory" argument (an absolute path) -- always pass it explicitly when the user ' +
             'is asking about a project other than the one currently open, including for git/gh commands (clone, push, delete a repo, etc.); ' +
             'never assume the currently open folder is the right one for a command about a different named project. ' +
+            'If you are not sure which file, folder, or target the user means, or an instruction is ambiguous, ask a short clarifying ' +
+            'question in plain text instead of guessing and calling a tool -- a wrong guess that runs a command is worse than asking. ' +
             'You can also list Android devices connected over USB (list_usb_devices), and once one is connected, use terminal commands ' +
             'like "adb install", "adb logcat -d", or "adb shell" for Kotlin/Android development tasks. ' +
             'You can search the web (web_search, DuckDuckGo instant-answer results -- limited, not full search), search Wikipedia ' +
