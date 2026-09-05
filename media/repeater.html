@@ -188,6 +188,12 @@
         }
         .msg-row.user .msg-bubble { background: var(--accent); color: #fff; }
         .msg-row.assistant .msg-bubble { background: var(--bg-panel); border: 1px solid var(--border); }
+        .quick-reply-row { display: flex; gap: 6px; padding-left: 2px; }
+        .quick-reply-btn {
+            background: var(--bg-input); border: 1px solid var(--border); color: var(--fg);
+            padding: 5px 14px; border-radius: 14px; font-size: 12px; cursor: pointer;
+        }
+        .quick-reply-btn:hover { border-color: var(--accent); color: var(--accent); }
 
         .result-entry {
             border: 1px solid var(--border);
@@ -595,7 +601,12 @@
 
         const DEFAULT_SYSTEM_PROMPT = 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing. ' +
             'You can call tools to set the target URL(s), headers, body, send HTTP requests, read/write files, list directories, and run ' +
-            'terminal commands (terminal commands always need explicit user approval first, regardless of mode). ' +
+            'terminal commands (terminal commands always need explicit user approval first, regardless of mode -- the approval prompt ' +
+            'pops up automatically the moment you call run_terminal_command, so never ask "do you want me to run this?" in your own ' +
+            'reply first -- that just adds a redundant round-trip and risks looping if the user\'s reply is ambiguous. As soon as you\'ve ' +
+            'decided a command is the right next step, call the tool directly and let the real approval prompt handle confirmation. ' +
+            'If the user has already said yes, ok, go ahead, do it, or anything else affirmative to a plan you described, call the tool ' +
+            'now instead of describing the plan again -- repeating yourself instead of acting is a bug, not a safe default. ' +
             'run_terminal_command takes an optional "directory" argument (an absolute path) -- always pass it explicitly when the user ' +
             'is asking about a project other than the one currently open, including for git/gh commands (clone, push, delete a repo, etc.); ' +
             'never assume the currently open folder is the right one for a command about a different named project. ' +
@@ -701,6 +712,13 @@
                 else if (entry.kind === 'confirm') chatLogEl.appendChild(renderConfirmEntry(entry));
                 else if (entry.kind === 'user' || entry.kind === 'assistant') chatLogEl.appendChild(renderMsg(entry));
             });
+            // A one-click Yes/No for whenever the last thing Xenos said ends in a question --
+            // most often "which one did you mean" style disambiguation now that it's told not
+            // to ask permission for actions the approval prompt already gates.
+            const lastEntry = visible[visible.length - 1];
+            if (!turnRunning && lastEntry && lastEntry.kind === 'assistant' && /\?\s*$/.test(lastEntry.text || '')) {
+                chatLogEl.appendChild(renderQuickReplies());
+            }
             if (thinking) {
                 const row = document.createElement('div');
                 row.className = 'thinking-row';
@@ -778,6 +796,18 @@
             bubble.className = 'msg-bubble';
             bubble.textContent = entry.text;
             row.appendChild(bubble);
+            return row;
+        }
+        function renderQuickReplies() {
+            const row = document.createElement('div');
+            row.className = 'quick-reply-row';
+            ['Yes', 'No'].forEach(label => {
+                const btn = document.createElement('button');
+                btn.className = 'quick-reply-btn';
+                btn.textContent = label;
+                btn.addEventListener('click', () => sendUserText(label + '.'));
+                row.appendChild(btn);
+            });
             return row;
         }
 
@@ -1241,6 +1271,24 @@
             else hideCommandMenu();
             if (val === '@') { chatInput.value = ''; hideCommandMenu(); sendBatch(); }
         });
+        // Shared by the Enter key, the send button's text path, and the quick-reply
+        // Yes/No buttons under a question -- one place that decides whether text goes to
+        // Stop, the interjection queue, or a fresh turn.
+        function sendUserText(val) {
+            val = (val || '').trim();
+            if (!val) return;
+            if (turnRunning) {
+                if (['stop', 'cancel', 'halt', 'abort'].includes(val.toLowerCase())) {
+                    requestStop();
+                    return;
+                }
+                addChatEntry({ kind: 'user', text: val });
+                addChatEntry({ kind: 'note', text: 'Sent — Xenos will pick this up as soon as it finishes its current step.' });
+                pendingInterjections.push(val);
+                return;
+            }
+            if (state.mode === 'agent') runAgent(val); else runAsk(val);
+        }
         chatInput.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter') return;
             e.preventDefault();
@@ -1255,17 +1303,7 @@
             }
             chatInput.value = ''; hideCommandMenu();
             if (val === '@') { sendBatch(); return; }
-            if (turnRunning) {
-                if (['stop', 'cancel', 'halt', 'abort'].includes(val.toLowerCase())) {
-                    requestStop();
-                    return;
-                }
-                addChatEntry({ kind: 'user', text: val });
-                addChatEntry({ kind: 'note', text: 'Sent — Xenos will pick this up as soon as it finishes its current step.' });
-                pendingInterjections.push(val);
-                return;
-            }
-            if (state.mode === 'agent') runAgent(val); else runAsk(val);
+            sendUserText(val);
         });
         plusBtn.addEventListener('click', () => { chatInput.value = '/'; showCommandMenu(''); chatInput.focus(); });
         sendBtn.addEventListener('click', () => {
