@@ -173,6 +173,17 @@ function handleCancelTerminal(message) {
     delete pendingTerminalProcesses[message.requestId];
 }
 
+// Keeps command output small enough that a few verbose commands (npm install, git clone,
+// nmap) don't balloon the model's own context -- the full output was never shown to the
+// user anywhere anyway (only a short preview in the step log), so this only trims what
+// goes into the conversation itself. Keeps the TAIL, not the head: for most CLI tools the
+// actual result (an error, a summary line, "up to date") is at the end, not the start.
+const TERMINAL_OUTPUT_CAP = 3000;
+function truncateOutput(text) {
+    if (text.length <= TERMINAL_OUTPUT_CAP) return text;
+    return `...[truncated ${text.length - TERMINAL_OUTPUT_CAP} earlier characters]\n` + text.slice(-TERMINAL_OUTPUT_CAP);
+}
+
 function handleTerminalCall(message, panel) {
     const { requestId, command, directory } = message;
     // A message handler must ALWAYS post a response, even on garbage input --
@@ -202,8 +213,8 @@ function handleTerminalCall(message, panel) {
                 type: 'terminalResult', requestId,
                 data: {
                     result: {
-                        stdout: stdout.slice(0, 20000),
-                        stderr: stderr.slice(0, 20000),
+                        stdout: truncateOutput(stdout),
+                        stderr: truncateOutput(stderr),
                         exitCode: err ? (err.code != null ? err.code : 1) : 0,
                         error: err && err.killed ? (entry.stoppedByUser ? 'Stopped by user' : 'Command timed out after 60s') : undefined,
                     },
