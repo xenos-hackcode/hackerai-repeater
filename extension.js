@@ -50,6 +50,9 @@ class RepeaterViewProvider {
                 case 'torFetchCall':
                     await handleTorFetch(message, webviewView);
                     break;
+                case 'apiFetchCall':
+                    await handleApiFetch(message, webviewView);
+                    break;
                 case 'wikipediaCall':
                     await handleWikipediaSearch(message, webviewView);
                     break;
@@ -434,6 +437,68 @@ async function handleSendRequest(message, panel) {
             requestId,
             data: { error: err.message }
         });
+    }
+}
+
+// Direct HTTP(S) call to any API endpoint the agent wants to reach -- unlike send_request
+// this doesn't go through the manual URL/headers/body chips, and unlike web_search/tor_fetch
+// it isn't scoped to one service, so it's the general-purpose "call a real API" tool.
+async function handleApiFetch(message, panel) {
+    const { requestId, method, url, headers, body } = message;
+    if (!url || typeof url !== 'string') {
+        panel.webview.postMessage({ type: 'apiFetchResult', requestId, data: { error: 'A url is required.' } });
+        return;
+    }
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(url);
+    } catch (err) {
+        panel.webview.postMessage({ type: 'apiFetchResult', requestId, data: { error: `Invalid URL: ${url}` } });
+        return;
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        panel.webview.postMessage({ type: 'apiFetchResult', requestId, data: { error: 'Only http:// and https:// URLs are supported.' } });
+        return;
+    }
+
+    const isHttps = parsedUrl.protocol === 'https:';
+    const lib = isHttps ? https : http;
+    const httpMethod = (method || 'GET').toUpperCase();
+    const headerObj = Object.assign({}, headers && typeof headers === 'object' ? headers : {});
+    const bodyStr = body != null ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+    if (bodyStr != null && !Object.keys(headerObj).some(k => k.toLowerCase() === 'content-type')) {
+        headerObj['Content-Type'] = 'application/json';
+    }
+
+    const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: httpMethod,
+        headers: headerObj,
+        timeout: 30000,
+    };
+
+    try {
+        const result = await new Promise((resolve, reject) => {
+            const req = lib.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve({
+                    statusCode: res.statusCode,
+                    statusMessage: res.statusMessage || '',
+                    headers: res.headers,
+                    body: data.slice(0, 20000),
+                }));
+            });
+            req.on('error', reject);
+            req.setTimeout(30000, () => { req.destroy(); reject(new Error('Request timed out after 30s')); });
+            if (bodyStr != null && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(httpMethod)) req.write(bodyStr);
+            req.end();
+        });
+        panel.webview.postMessage({ type: 'apiFetchResult', requestId, data: { result } });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'apiFetchResult', requestId, data: { error: err.message } });
     }
 }
 

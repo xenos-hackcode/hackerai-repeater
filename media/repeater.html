@@ -408,6 +408,10 @@
                 <button class="mode-btn" id="askModeBtn" title="Ask: chat only, no autonomous actions">Ask</button>
                 <button class="mode-btn" id="agentModeBtn" data-mode="agent" title="Agent: AI can call tools and act on its own">Agent</button>
             </div>
+            <button class="icon-btn" id="tasksBtn" title="Tasks: start a new task, compact this one, or switch back to a saved one">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                Tasks
+            </button>
             <button class="icon-btn" id="toolsToggleBtn" title="Tools">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a1.5 1.5 0 0 0 2 2l6-6a4 4 0 0 0 5.4-5.4l-2.1 2.1-2-2 2.1-2.1Z"/></svg>
                 Tools
@@ -417,6 +421,7 @@
         <div class="chat-view" id="chatView">
             <div class="chat-log" id="chatLog"></div>
 
+            <div class="command-menu" id="tasksMenu" hidden></div>
             <div class="command-menu" id="commandMenu" hidden></div>
 
             <div class="builder-bar" id="builderBar" hidden>
@@ -521,6 +526,8 @@
 
         // ---------- DOM refs ----------
         const toolsToggleBtn = document.getElementById('toolsToggleBtn');
+        const tasksBtn = document.getElementById('tasksBtn');
+        const tasksMenu = document.getElementById('tasksMenu');
         const askModeBtn = document.getElementById('askModeBtn');
         const agentModeBtn = document.getElementById('agentModeBtn');
         const chatLogEl = document.getElementById('chatLog');
@@ -595,8 +602,9 @@
             'You can also list Android devices connected over USB (list_usb_devices), and once one is connected, use terminal commands ' +
             'like "adb install", "adb logcat -d", or "adb shell" for Kotlin/Android development tasks. ' +
             'You can search the web (web_search, DuckDuckGo instant-answer results -- limited, not full search), search Wikipedia ' +
-            '(wikipedia_search, free), and fetch a URL including .onion addresses through a locally running Tor proxy (tor_fetch, ' +
-            'always asks for approval first). ' +
+            '(wikipedia_search, free), fetch a URL including .onion addresses through a locally running Tor proxy (tor_fetch, ' +
+            'always asks for approval first), and call any real HTTP/HTTPS API directly with a method, headers, and body ' +
+            '(api_fetch) -- use api_fetch whenever the user wants you to actually reach a live API or webhook, not just search. ' +
             'Keep your own working notes, plans, and context in a "hacker" folder at the workspace root (e.g. hacker/NOTES.md), the way ' +
             'Claude Code keeps a .claude folder. Only act on targets and files the user has authorized. ' +
             'Reply in plain conversational English, like you are talking to the user directly. Do not use bracketed tags like ' +
@@ -618,6 +626,7 @@
                     role: 'system',
                     content: DEFAULT_SYSTEM_PROMPT,
                 }],
+                sessions: [],
             };
         }
         const state = loadState();
@@ -630,6 +639,7 @@
         if (!Array.isArray(state.agentHistory) || !state.agentHistory.length) {
             state.agentHistory = [{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }];
         }
+        if (!Array.isArray(state.sessions)) state.sessions = [];
         let lastResponseForAI = null;
         let pendingRequests = {};   // requestId -> { entryId, index }
         let entryResolvers = {};   // entryId -> resolve callback (used by the agent's send_request tool)
@@ -642,6 +652,7 @@
         let webSearchPending = {};  // requestId -> resolve
         let torFetchPending = {};   // requestId -> resolve
         let wikipediaPending = {};  // requestId -> resolve
+        let apiFetchPending = {};  // requestId -> resolve
         let pendingConfirms = {};  // confirm entry id -> resolve(approved)
 
         function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -865,6 +876,129 @@
         }
         confirmModeBtn.addEventListener('click', toggleConfirmMenu);
         renderConfirmModeBtn();
+
+        // ---------- Tasks: new/compact/switch (Tasks button) ----------
+        // A "task" is everything scoped to one conversation: the chat log, the LLM
+        // history, and the url/headers/body chips. API/plugin connections and settings
+        // (mode, confirm mode) are shared across tasks, not archived with them.
+        function taskScopedSnapshot() {
+            return {
+                chatLog: state.chatLog,
+                agentHistory: state.agentHistory,
+                versionCounters: { url: state.versionCounters.url, headers: state.versionCounters.headers, body: state.versionCounters.body },
+                activeChipId: { url: state.activeChipId.url, headers: state.activeChipId.headers, body: state.activeChipId.body },
+                showOutput: state.showOutput,
+            };
+        }
+        function taskTitle(snapshot) {
+            const firstMsg = (snapshot.chatLog || []).find(e => e.kind === 'user');
+            const text = (firstMsg && firstMsg.text) ? firstMsg.text : 'New task';
+            return text.length > 42 ? text.slice(0, 42) + '…' : text;
+        }
+        function applyTaskSnapshot(snapshot) {
+            state.chatLog = snapshot.chatLog;
+            state.agentHistory = snapshot.agentHistory;
+            state.versionCounters.url = snapshot.versionCounters.url;
+            state.versionCounters.headers = snapshot.versionCounters.headers;
+            state.versionCounters.body = snapshot.versionCounters.body;
+            state.activeChipId.url = snapshot.activeChipId.url;
+            state.activeChipId.headers = snapshot.activeChipId.headers;
+            state.activeChipId.body = snapshot.activeChipId.body;
+            state.showOutput = snapshot.showOutput;
+        }
+        function blankTask() {
+            return {
+                chatLog: [],
+                agentHistory: [{ role: 'system', content: state.agentHistory[0] ? state.agentHistory[0].content : DEFAULT_SYSTEM_PROMPT }],
+                versionCounters: { url: 0, headers: 0, body: 0 },
+                activeChipId: { url: null, headers: null, body: null },
+                showOutput: state.showOutput,
+            };
+        }
+        function startNewTask() {
+            if (state.chatLog.length > 0) {
+                const snap = taskScopedSnapshot();
+                state.sessions.unshift({ id: uid(), savedAt: Date.now(), title: taskTitle(snap), ...snap });
+                if (state.sessions.length > 20) state.sessions.length = 20;
+            }
+            applyTaskSnapshot(blankTask());
+            saveState();
+            renderChatLog();
+            hideTasksMenu();
+        }
+        function switchToTask(sessionId) {
+            const sessions = state.sessions.slice();
+            const targetIdx = sessions.findIndex(s => s.id === sessionId);
+            if (targetIdx === -1) return;
+            const target = sessions[targetIdx];
+            sessions.splice(targetIdx, 1);
+            if (state.chatLog.length > 0) {
+                const snap = taskScopedSnapshot();
+                sessions.unshift({ id: uid(), savedAt: Date.now(), title: taskTitle(snap), ...snap });
+            }
+            if (sessions.length > 20) sessions.length = 20;
+            state.sessions = sessions;
+            applyTaskSnapshot(target);
+            saveState();
+            renderChatLog();
+            hideTasksMenu();
+        }
+        // Summarizes the LLM history via the model itself and replaces it with the summary,
+        // so a long task doesn't either silently lose context or blow past a small local
+        // model's context window. Falls back to a hard trim only if summarizing fails.
+        async function compactAgentHistory(silent) {
+            if (state.agentHistory.length <= 2) return;
+            const sys = state.agentHistory[0];
+            const rest = state.agentHistory.slice(1);
+            const transcript = rest.map(m => {
+                if (m.role === 'tool') return `[tool result] ${String(m.content).slice(0, 300)}`;
+                if (m.role === 'assistant') return `Assistant: ${m.content || '(tool call)'}`;
+                return `User: ${m.content}`;
+            }).join('\n').slice(0, 8000);
+            const prompt = 'Summarize the conversation below into a short brief for yourself to continue from -- what the user wants, ' +
+                'decisions made, files/targets touched, and anything still pending. Be concise, plain text, no headers or tags.\n\n' + transcript;
+            const result = await callLLMAsync([sys, { role: 'user', content: prompt }], []);
+            const summary = result && result.content && result.content.trim();
+            if (summary) {
+                state.agentHistory = [sys, { role: 'user', content: 'Summary of earlier conversation so far:\n' + summary }];
+                if (!silent) addChatEntry({ kind: 'note', text: 'Task compacted — earlier history replaced with a summary to free up context.' });
+            } else if (rest.length > 40) {
+                state.agentHistory = [sys, ...rest.slice(-19)];
+            }
+            saveState();
+        }
+        function toggleTasksMenu() {
+            if (!tasksMenu.hidden) { hideTasksMenu(); return; }
+            tasksMenu.innerHTML = '';
+            const newItem = document.createElement('div');
+            newItem.className = 'command-item';
+            newItem.innerHTML = '<span class="cmd-name">+ New task</span><span class="cmd-desc">Save this one and start fresh</span>';
+            newItem.addEventListener('click', startNewTask);
+            tasksMenu.appendChild(newItem);
+
+            const compactItem = document.createElement('div');
+            compactItem.className = 'command-item';
+            compactItem.innerHTML = '<span class="cmd-name">Compact this task</span><span class="cmd-desc">Summarize history so far to free up context</span>';
+            compactItem.addEventListener('click', async () => {
+                hideTasksMenu();
+                setThinking(true);
+                await compactAgentHistory(false);
+                setThinking(false);
+            });
+            tasksMenu.appendChild(compactItem);
+
+            state.sessions.forEach(s => {
+                const item = document.createElement('div');
+                item.className = 'command-item';
+                const when = new Date(s.savedAt).toLocaleString();
+                item.innerHTML = `<span class="cmd-name">${escapeHtml(s.title || 'Task')}</span><span class="cmd-desc">${escapeHtml(when)}</span>`;
+                item.addEventListener('click', () => switchToTask(s.id));
+                tasksMenu.appendChild(item);
+            });
+            tasksMenu.hidden = false;
+        }
+        function hideTasksMenu() { tasksMenu.hidden = true; tasksMenu.innerHTML = ''; }
+        tasksBtn.addEventListener('click', toggleTasksMenu);
 
         function runCommand(name) {
             if (name === 'output') {
@@ -1176,6 +1310,10 @@
                 const resolve = wikipediaPending[msg.requestId];
                 if (resolve) { delete wikipediaPending[msg.requestId]; resolve(msg.data); }
 
+            } else if (msg.type === 'apiFetchResult') {
+                const resolve = apiFetchPending[msg.requestId];
+                if (resolve) { delete apiFetchPending[msg.requestId]; resolve(msg.data); }
+
             } else if (msg.type === 'loadRequest') {
                 loadRawRequest(msg.data);
             }
@@ -1245,6 +1383,7 @@
                 { type: 'function', function: { name: 'send_request', description: 'Send the currently configured HTTP request(s) using the active URL/headers/body, and return status/bytes for each.', parameters: { type: 'object', properties: { method: { type: 'string', description: 'HTTP method, defaults to the method selected in Tools.' } } } } },
                 { type: 'function', function: { name: 'web_search', description: 'Search the web (DuckDuckGo instant-answer results -- limited, not full search results).', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
                 { type: 'function', function: { name: 'tor_fetch', description: 'Fetch a URL (including .onion addresses) through a locally running Tor SOCKS proxy on 127.0.0.1:9050.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
+                { type: 'function', function: { name: 'api_fetch', description: 'Call any real HTTP/HTTPS API directly (GET/POST/PUT/PATCH/DELETE) and get back the status, headers, and body. Use this for calling REST APIs, webhooks, or any live web endpoint -- separate from the manual URL/headers/body repeater chips.', parameters: { type: 'object', properties: { method: { type: 'string', description: 'HTTP method, defaults to GET.' }, url: { type: 'string' }, headers: { type: 'object', description: 'Header name/value pairs.' }, body: { type: 'string', description: 'Raw request body, e.g. a JSON string for POST/PUT/PATCH.' } }, required: ['url'] } } },
                 { type: 'function', function: { name: 'wikipedia_search', description: 'Search Wikipedia (free, no key needed) and return matching article titles, URLs, and snippets.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
             ];
         }
@@ -1315,6 +1454,13 @@
                 vscode.postMessage({ type: 'wikipediaCall', requestId, query });
             });
         }
+        function callApiFetchAsync(method, url, headers, body) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                apiFetchPending[requestId] = resolve;
+                vscode.postMessage({ type: 'apiFetchCall', requestId, method, url, headers, body });
+            });
+        }
         // Confirmation gate: renders an Accept/Deny chat entry and waits for the user's click.
         function requestConfirm(call) {
             return new Promise((resolve) => {
@@ -1367,6 +1513,7 @@
             if (call.name === 'list_usb_devices') return await callListDevicesAsync();
             if (call.name === 'web_search') return await callWebSearchAsync(args.query);
             if (call.name === 'tor_fetch') return await callTorFetchAsync(args.url);
+            if (call.name === 'api_fetch') return await callApiFetchAsync(args.method, args.url, args.headers, args.body);
             if (call.name === 'wikipedia_search') return await callWikipediaAsync(args.query);
             if (call.name.startsWith('plugin_')) {
                 const chip = state.activeChipId.plugins ? findChip(state.activeChipId.plugins) : null;
@@ -1384,9 +1531,9 @@
         async function runChatTurn(userText, tools) {
             addChatEntry({ kind: 'user', text: userText });
             state.agentHistory.push({ role: 'user', content: userText });
-            if (state.agentHistory.length > 20) state.agentHistory = [state.agentHistory[0], ...state.agentHistory.slice(-19)];
-            let iterations = 0;
             setThinking(true);
+            if (state.agentHistory.length > 24) await compactAgentHistory(true);
+            let iterations = 0;
             while (iterations < 4) {
                 iterations++;
                 logStep(`Thinking… (step ${iterations}, can take a while on CPU)`);
