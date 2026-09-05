@@ -8,6 +8,8 @@ const net = require('net');
 const tls = require('tls');
 
 let activeView = null; // the current webviewView (docked panel tab), if resolved
+const pendingLLMRequests = {};       // requestId -> http.ClientRequest, so Stop can actually kill an in-flight generation
+const pendingTerminalProcesses = {}; // requestId -> ChildProcess, so Stop can actually kill a running command
 
 class RepeaterViewProvider {
     constructor(extensionPath) {
@@ -55,6 +57,12 @@ class RepeaterViewProvider {
                     break;
                 case 'wikipediaCall':
                     await handleWikipediaSearch(message, webviewView);
+                    break;
+                case 'cancelLLM':
+                    handleCancelLLM(message);
+                    break;
+                case 'cancelTerminal':
+                    handleCancelTerminal(message);
                     break;
                 case 'log':
                     console.log('[Repeater]', message.text);
@@ -144,6 +152,27 @@ async function handleFsCall(message, panel) {
     }
 }
 
+// Best-effort Stop support: the webview resolves its own waiting promise immediately
+// (see requestStop() in repeater.html) so the UI never hangs on these, but without this
+// the underlying Ollama generation / shell command would keep running in the background
+// for no reason after the user has already stopped the task.
+function handleCancelLLM(message) {
+    const req = pendingLLMRequests[message.requestId];
+    if (req) { req.destroy(); delete pendingLLMRequests[message.requestId]; }
+}
+function handleCancelTerminal(message) {
+    const entry = pendingTerminalProcesses[message.requestId];
+    if (entry && entry.child && entry.child.pid) {
+        entry.stoppedByUser = true;
+        if (process.platform === 'win32') {
+            exec(`taskkill /pid ${entry.child.pid} /t /f`);
+        } else {
+            entry.child.kill('SIGKILL');
+        }
+    }
+    delete pendingTerminalProcesses[message.requestId];
+}
+
 function handleTerminalCall(message, panel) {
     const { requestId, command, directory } = message;
     // A message handler must ALWAYS post a response, even on garbage input --
@@ -166,7 +195,9 @@ function handleTerminalCall(message, panel) {
         return;
     }
     try {
-        exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        const entry = { child: null, stoppedByUser: false };
+        const child = exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+            delete pendingTerminalProcesses[requestId];
             panel.webview.postMessage({
                 type: 'terminalResult', requestId,
                 data: {
@@ -174,11 +205,13 @@ function handleTerminalCall(message, panel) {
                         stdout: stdout.slice(0, 20000),
                         stderr: stderr.slice(0, 20000),
                         exitCode: err ? (err.code != null ? err.code : 1) : 0,
-                        error: err && err.killed ? 'Command timed out after 60s' : undefined,
+                        error: err && err.killed ? (entry.stoppedByUser ? 'Stopped by user' : 'Command timed out after 60s') : undefined,
                     },
                 },
             });
         });
+        entry.child = child;
+        pendingTerminalProcesses[requestId] = entry;
     } catch (err) {
         panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: `Could not run command: ${err.message}` } });
     }
@@ -504,7 +537,7 @@ async function handleApiFetch(message, panel) {
 
 // Generic JSON-over-HTTP(S) POST helper, reused for Ollama / OpenAI-compatible /
 // Anthropic-shaped endpoints and plugin webhooks.
-function postJSON(urlStr, headers, payload, timeoutMs) {
+function postJSON(urlStr, headers, payload, timeoutMs, onRequest) {
     return new Promise((resolve, reject) => {
         let parsedUrl;
         try {
@@ -542,6 +575,7 @@ function postJSON(urlStr, headers, payload, timeoutMs) {
                 }
             });
         });
+        if (onRequest) onRequest(req);
         req.on('error', reject);
         req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
         req.write(body);
@@ -550,7 +584,7 @@ function postJSON(urlStr, headers, payload, timeoutMs) {
 }
 
 // Normalizes a chat completion across providers into { content, toolCalls, promptTokens, responseTokens }.
-async function callLLM(messages, tools, apiConfig, localModel) {
+async function callLLM(messages, tools, apiConfig, localModel, requestId) {
     if (!apiConfig) {
         // Local Ollama
         const data = await postJSON('http://127.0.0.1:11434/api/chat', {}, {
@@ -558,7 +592,7 @@ async function callLLM(messages, tools, apiConfig, localModel) {
             messages,
             tools: tools && tools.length ? tools : undefined,
             stream: false,
-        }, 180000).catch(err => {
+        }, 180000, requestId ? (req) => { pendingLLMRequests[requestId] = req; } : undefined).catch(err => {
             throw new Error(`Could not reach Ollama at localhost:11434 (${err.message}). Make sure Ollama is running and the model is loaded.`);
         });
         const msg = data.message || {};
@@ -628,10 +662,12 @@ async function callLLM(messages, tools, apiConfig, localModel) {
 async function handleLLMCall(message, panel) {
     const { requestId, messages, tools, apiConfig, model } = message;
     try {
-        const result = await callLLM(messages, tools, apiConfig, model);
+        const result = await callLLM(messages, tools, apiConfig, model, requestId);
         panel.webview.postMessage({ type: 'llmResult', requestId, data: result });
     } catch (err) {
         panel.webview.postMessage({ type: 'llmResult', requestId, data: { error: err.message } });
+    } finally {
+        delete pendingLLMRequests[requestId];
     }
 }
 

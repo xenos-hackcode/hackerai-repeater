@@ -276,6 +276,8 @@
         .round-btn:hover { color: var(--fg); border-color: var(--accent); }
         .round-btn.send { background: var(--accent); color: #fff; border-color: var(--accent); }
         .round-btn.send:hover { filter: brightness(1.15); }
+        .round-btn.stop { background: var(--red); color: #fff; border-color: var(--red); }
+        .round-btn.stop:hover { filter: brightness(1.15); }
         .round-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
         /* Builder bar (composing /url /headers /body /plugins /api) */
@@ -708,6 +710,46 @@
         // act on it immediately or finish the current step first.
         let turnRunning = false;
         let pendingInterjections = [];
+        // Hard stop: unlike an interjection (which the model reads and may or may not act
+        // on), Stop halts the loop itself deterministically -- no more tool calls execute,
+        // any pending confirm is auto-denied, and the in-flight LLM call / terminal command
+        // is killed rather than left running uselessly in the background.
+        let stopRequested = false;
+        let currentLLMRequestId = null;
+        let currentTerminalRequestId = null;
+        function requestStop() {
+            if (!turnRunning) return;
+            stopRequested = true;
+            pendingInterjections = [];
+            Object.keys(pendingConfirms).forEach(id => pendingConfirms[id](false));
+            if (currentLLMRequestId) {
+                const requestId = currentLLMRequestId;
+                vscode.postMessage({ type: 'cancelLLM', requestId });
+                const resolve = llmPending[requestId];
+                delete llmPending[requestId];
+                currentLLMRequestId = null;
+                if (resolve) resolve({ content: '', toolCalls: [], stopped: true });
+            }
+            if (currentTerminalRequestId) {
+                const requestId = currentTerminalRequestId;
+                vscode.postMessage({ type: 'cancelTerminal', requestId });
+                const resolve = terminalPending[requestId];
+                delete terminalPending[requestId];
+                currentTerminalRequestId = null;
+                if (resolve) resolve({ result: { stdout: '', stderr: '', exitCode: -1, error: 'Stopped by user' } });
+            }
+        }
+        function renderSendBtn() {
+            if (turnRunning) {
+                sendBtn.classList.add('stop');
+                sendBtn.title = 'Stop';
+                sendBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="#fff" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+            } else {
+                sendBtn.classList.remove('stop');
+                sendBtn.title = 'Send (@)';
+                sendBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" stroke="#fff"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>';
+            }
+        }
 
         function renderMsg(entry) {
             const row = document.createElement('div');
@@ -1186,6 +1228,10 @@
             chatInput.value = ''; hideCommandMenu();
             if (val === '@') { sendBatch(); return; }
             if (turnRunning) {
+                if (['stop', 'cancel', 'halt', 'abort'].includes(val.toLowerCase())) {
+                    requestStop();
+                    return;
+                }
                 addChatEntry({ kind: 'user', text: val });
                 addChatEntry({ kind: 'note', text: 'Sent — Xenos will pick this up as soon as it finishes its current step.' });
                 pendingInterjections.push(val);
@@ -1194,7 +1240,10 @@
             if (state.mode === 'agent') runAgent(val); else runAsk(val);
         });
         plusBtn.addEventListener('click', () => { chatInput.value = '/'; showCommandMenu(''); chatInput.focus(); });
-        sendBtn.addEventListener('click', () => { chatInput.value = ''; hideCommandMenu(); sendBatch(); });
+        sendBtn.addEventListener('click', () => {
+            if (turnRunning) { requestStop(); return; }
+            chatInput.value = ''; hideCommandMenu(); sendBatch();
+        });
 
         // ---------- Ask/Agent mode ----------
         function renderMode() {
@@ -1379,7 +1428,11 @@
         function callLLMAsync(messages, tools) {
             return new Promise((resolve) => {
                 const requestId = uid();
-                llmPending[requestId] = resolve;
+                currentLLMRequestId = requestId;
+                llmPending[requestId] = (data) => {
+                    if (currentLLMRequestId === requestId) currentLLMRequestId = null;
+                    resolve(data);
+                };
                 vscode.postMessage({ type: 'llmCall', requestId, messages, tools, apiConfig: getActiveApiConfig(), model: 'xenos' });
             });
         }
@@ -1439,7 +1492,11 @@
         function callTerminalAsync(command, directory) {
             return new Promise((resolve) => {
                 const requestId = uid();
-                terminalPending[requestId] = resolve;
+                currentTerminalRequestId = requestId;
+                terminalPending[requestId] = (data) => {
+                    if (currentTerminalRequestId === requestId) currentTerminalRequestId = null;
+                    resolve(data);
+                };
                 vscode.postMessage({ type: 'terminalCall', requestId, command, directory });
             });
         }
@@ -1551,10 +1608,13 @@
             setThinking(true);
             if (state.agentHistory.length > 24) await compactAgentHistory(true);
             turnRunning = true;
+            stopRequested = false;
+            renderSendBtn();
             try {
             let iterations = 0;
             const MAX_TOOL_ITERATIONS = 40; // long enough for a real multi-step task (e.g. attack -> diagnose -> patch -> retest); dangerous actions still always confirm regardless of this cap.
             while (iterations < MAX_TOOL_ITERATIONS) {
+                if (stopRequested) break;
                 iterations++;
                 // Anything the user typed while the previous step was still running gets
                 // handed to the model now, at this natural checkpoint between steps.
@@ -1570,6 +1630,7 @@
                 }
                 logStep(`Thinking… (step ${iterations}/${MAX_TOOL_ITERATIONS}, can take a while on CPU)`);
                 const result = await callLLMAsync(state.agentHistory, tools);
+                if (stopRequested || result.stopped) break;
                 if (result.error) {
                     setThinking(false);
                     logStep(`Error: ${result.error}`);
@@ -1583,12 +1644,16 @@
                         tool_calls: result.toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } })),
                     });
                     for (const call of result.toolCalls) {
+                        if (stopRequested) {
+                            state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Stopped by user' }) });
+                            continue;
+                        }
                         const needsConfirm = state.confirmMode === 'manual' || call.name === 'run_terminal_command' || call.name === 'tor_fetch';
                         if (needsConfirm) {
                             const approved = await requestConfirm(call);
                             if (!approved) {
                                 logStep(`${call.name} denied by user`);
-                                state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Denied by user' }) });
+                                state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: stopRequested ? 'Stopped by user' : 'Denied by user' }) });
                                 continue;
                             }
                         }
@@ -1611,9 +1676,16 @@
                 return;
             }
             setThinking(false);
-            addChatEntry({ kind: 'assistant', text: `(stopped after ${MAX_TOOL_ITERATIONS} tool steps in this turn — say "continue" to keep going)` });
+            if (stopRequested) {
+                addChatEntry({ kind: 'assistant', text: 'Stopped.' });
+            } else {
+                addChatEntry({ kind: 'assistant', text: `(stopped after ${MAX_TOOL_ITERATIONS} tool steps in this turn — say "continue" to keep going)` });
+            }
+            saveState();
             } finally {
                 turnRunning = false;
+                stopRequested = false;
+                renderSendBtn();
             }
         }
 
