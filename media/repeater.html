@@ -701,6 +701,13 @@
         }
         let thinking = false;
         function setThinking(v) { thinking = v; renderChatLog(); }
+        // Lets the user type a new message while a task is already mid-flight instead of
+        // racing a second runChatTurn against the first one. The new message shows up in
+        // the chat right away; the model itself only sees it at the next natural checkpoint
+        // (after the tool call it's currently running finishes), and decides then whether to
+        // act on it immediately or finish the current step first.
+        let turnRunning = false;
+        let pendingInterjections = [];
 
         function renderMsg(entry) {
             const row = document.createElement('div');
@@ -1178,6 +1185,12 @@
             }
             chatInput.value = ''; hideCommandMenu();
             if (val === '@') { sendBatch(); return; }
+            if (turnRunning) {
+                addChatEntry({ kind: 'user', text: val });
+                addChatEntry({ kind: 'note', text: 'Sent — Xenos will pick this up as soon as it finishes its current step.' });
+                pendingInterjections.push(val);
+                return;
+            }
             if (state.mode === 'agent') runAgent(val); else runAsk(val);
         });
         plusBtn.addEventListener('click', () => { chatInput.value = '/'; showCommandMenu(''); chatInput.focus(); });
@@ -1537,10 +1550,24 @@
             state.agentHistory.push({ role: 'user', content: userText });
             setThinking(true);
             if (state.agentHistory.length > 24) await compactAgentHistory(true);
+            turnRunning = true;
+            try {
             let iterations = 0;
             const MAX_TOOL_ITERATIONS = 40; // long enough for a real multi-step task (e.g. attack -> diagnose -> patch -> retest); dangerous actions still always confirm regardless of this cap.
             while (iterations < MAX_TOOL_ITERATIONS) {
                 iterations++;
+                // Anything the user typed while the previous step was still running gets
+                // handed to the model now, at this natural checkpoint between steps.
+                if (pendingInterjections.length) {
+                    const extra = pendingInterjections.splice(0, pendingInterjections.length);
+                    extra.forEach(text => {
+                        state.agentHistory.push({
+                            role: 'user',
+                            content: `(New message from the user, sent while you were still working on the task above. ` +
+                                `Decide whether to address it right now or finish the current step first, then continue.)\n${text}`,
+                        });
+                    });
+                }
                 logStep(`Thinking… (step ${iterations}/${MAX_TOOL_ITERATIONS}, can take a while on CPU)`);
                 const result = await callLLMAsync(state.agentHistory, tools);
                 if (result.error) {
@@ -1585,6 +1612,9 @@
             }
             setThinking(false);
             addChatEntry({ kind: 'assistant', text: `(stopped after ${MAX_TOOL_ITERATIONS} tool steps in this turn — say "continue" to keep going)` });
+            } finally {
+                turnRunning = false;
+            }
         }
 
         async function runAgent(userText) {
