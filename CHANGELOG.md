@@ -2,6 +2,14 @@
 
 All notable changes to HackerAI Repeater, newest first.
 
+## 1.8.1
+- The "task is getting long" hint from v1.7.3 was firing on the very first
+  message of a brand new task — it summed the whole history including the
+  system prompt itself (7,500+ characters), which alone already exceeded
+  the hint's threshold. Excluded the system prompt from the count
+  everywhere it's used (the hint and auto-compaction) — fixed overhead
+  present from message zero isn't conversation growth.
+
 ## 1.8.0
 - New `/github` command stores a separate GitHub token for Xenos in VS
   Code's real `SecretStorage` (OS-level encrypted keychain), not the plain
