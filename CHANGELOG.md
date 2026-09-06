@@ -245,29 +245,32 @@ All notable changes to HackerAI Repeater, newest first.
 
 ## Findings worth keeping, not tied to one version
 
-**GitHub's "Built by Claude" badge tracks the commit message content, not
-which agent performed the push — corrected from an earlier, premature
-conclusion.** First round of testing (casino, webrtc — both pushed via Xenos
-through `run_terminal_command`, approved step by step) showed no badge, which
-looked like it confirmed "the badge is tied to which tool pushed it." But
-both of those commits happened to carry zero Claude attribution of any kind,
-for unrelated reasons. The real test came next: `isio-afar`, also pushed via
-Xenos, but its existing commit message already contained
-`Co-Authored-By: Claude Sonnet 4.6` from when it was first created — and it
-**did** show the badge. Same pushing tool, different outcome, only variable
-that changed was the commit message itself. That's a much better-supported
-explanation: GitHub is almost certainly scanning commit messages for an
-AI-attribution trailer (`Co-Authored-By: Claude`, and likely `Generated with
-Claude Code` / similar) and badging based on that, regardless of who ran
-`git push`. Checked the two remaining untested repos on this basis before
-touching them: `church` (`miv-`) has 8 commits with
-`Co-Authored-By: Claude Sonnet 5` baked in — expect the badge there
-regardless of which tool pushes it, unless those commit messages get
-rewritten first. `SciFiLauncher` (`Elene-Sifilaucher`) is genuinely clean (a
-`.claude`-as-gitignored-folder-name false match aside) and should behave like
-casino/webrtc. Still untested: `hacker-x-globe` (has uncommitted local
-changes to resolve first) and `hackerai-repeater` itself, whose commits carry
-`Co-Authored-By: Claude` throughout by design.
+**GitHub's "Built by Claude" badge is a permanent record of whether Claude
+Code has ever pushed to that specific repo — not a live re-scan of current
+commit content. Corrected twice now as more evidence came in.** Round one
+(casino, webrtc — pushed via Xenos, no badge) looked like "tied to which tool
+pushed it." Round two (`isio-afar` — also pushed via Xenos, but its commit
+message already had `Co-Authored-By: Claude Sonnet 4.6` baked in — badge
+showed) pointed to "tied to commit message content instead." Round three is
+what actually settled it: `church` (`miv-`) had its ENTIRE commit history
+independently rewritten before this session ever touched it (author fields
+changed, all `Co-Authored-By: Claude` text removed — verified exhaustively,
+zero matches across all 31 commits) and the badge **still shows** — now
+crediting both the user and Claude jointly, like a real contributor list. A
+rewrite that only current commit text can reach doesn't touch it. The
+pattern that actually explains every observation: the badge tracks whether
+Claude Code has *ever*, at any point in the repo's lifetime, pushed to *that
+specific repo* — a server-side history GitHub keeps regardless of later
+rewrites. Deleting the repo and creating a genuinely new one (as casino and
+webrtc were) resets that history; rewriting commits in an existing repo that
+Claude previously touched does not. So the actual fix for `miv-` is the same
+delete-and-recreate-fresh pattern as casino/webrtc, not further history
+surgery on the existing repo. `SciFiLauncher` (`Elene-Sifilaucher`) is
+content-clean and was never deleted/recreated, so it's genuinely unresolved
+which rule applies until tested. Still untested: `hacker-x-globe` (has
+uncommitted local changes to resolve first) and `hackerai-repeater` itself,
+whose commits carry `Co-Authored-By: Claude` throughout by design and whose
+every push this whole project has gone through Claude Code directly.
 
 **The original 110K-example fine-tuning dataset has zero tool-calling
 examples.** It's single-turn `{instruction, output}` security-writing
