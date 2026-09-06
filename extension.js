@@ -10,10 +10,16 @@ const tls = require('tls');
 let activeView = null; // the current webviewView (docked panel tab), if resolved
 const pendingLLMRequests = {};       // requestId -> http.ClientRequest, so Stop can actually kill an in-flight generation
 const pendingTerminalProcesses = {}; // requestId -> ChildProcess, so Stop can actually kill a running command
+// VS Code's SecretStorage -- OS-level encrypted keychain (Credential Manager / Keychain /
+// libsecret), NOT the webview's plain localStorage everything else in this extension uses.
+// Reserved specifically for a credential that acts on the user's behalf against a real
+// external service, unlike the /api keys (which is a pre-existing gap, not fixed here).
+const XENOS_GH_TOKEN_KEY = 'xenosGithubToken';
 
 class RepeaterViewProvider {
-    constructor(extensionPath) {
+    constructor(extensionPath, secrets) {
         this.extensionPath = extensionPath;
+        this.secrets = secrets;
     }
 
     resolveWebviewView(webviewView) {
@@ -23,6 +29,7 @@ class RepeaterViewProvider {
         const htmlPath = path.join(this.extensionPath, 'media', 'repeater.html');
         webviewView.webview.html = fs.readFileSync(htmlPath, 'utf8');
 
+        const secrets = this.secrets;
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.type) {
                 case 'sendRequest':
@@ -41,7 +48,7 @@ class RepeaterViewProvider {
                     await handleFsCall(message, webviewView);
                     break;
                 case 'terminalCall':
-                    await handleTerminalCall(message, webviewView);
+                    await handleTerminalCall(message, webviewView, secrets);
                     break;
                 case 'listDevicesCall':
                     await handleListDevices(message, webviewView);
@@ -64,6 +71,12 @@ class RepeaterViewProvider {
                 case 'cancelTerminal':
                     handleCancelTerminal(message);
                     break;
+                case 'storeGithubToken':
+                    await handleStoreGithubToken(message, webviewView, secrets);
+                    break;
+                case 'checkGithubToken':
+                    await handleCheckGithubToken(message, webviewView, secrets);
+                    break;
                 case 'log':
                     console.log('[Repeater]', message.text);
                     break;
@@ -76,10 +89,37 @@ class RepeaterViewProvider {
     }
 }
 
+// The raw token value is never sent back to the webview once stored -- only a boolean
+// "is something configured" status. Clearing is done by storing an empty value.
+async function handleStoreGithubToken(message, panel, secrets) {
+    const { requestId, token } = message;
+    try {
+        const trimmed = typeof token === 'string' ? token.trim() : '';
+        if (!trimmed) {
+            await secrets.delete(XENOS_GH_TOKEN_KEY);
+            panel.webview.postMessage({ type: 'githubTokenResult', requestId, data: { ok: true, configured: false } });
+            return;
+        }
+        await secrets.store(XENOS_GH_TOKEN_KEY, trimmed);
+        panel.webview.postMessage({ type: 'githubTokenResult', requestId, data: { ok: true, configured: true } });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'githubTokenResult', requestId, data: { error: err.message } });
+    }
+}
+async function handleCheckGithubToken(message, panel, secrets) {
+    const { requestId } = message;
+    try {
+        const token = await secrets.get(XENOS_GH_TOKEN_KEY);
+        panel.webview.postMessage({ type: 'githubTokenStatus', requestId, data: { configured: !!token } });
+    } catch (err) {
+        panel.webview.postMessage({ type: 'githubTokenStatus', requestId, data: { configured: false, error: err.message } });
+    }
+}
+
 function activate(context) {
     console.log('HackerAI Repeater activated');
 
-    const provider = new RepeaterViewProvider(context.extensionPath);
+    const provider = new RepeaterViewProvider(context.extensionPath, context.secrets);
     const providerRegistration = vscode.window.registerWebviewViewProvider(
         'hackeraiRepeater.view',
         provider,
@@ -184,8 +224,8 @@ function truncateOutput(text) {
     return `...[truncated ${text.length - TERMINAL_OUTPUT_CAP} earlier characters]\n` + text.slice(-TERMINAL_OUTPUT_CAP);
 }
 
-function handleTerminalCall(message, panel) {
-    const { requestId, command, directory } = message;
+async function handleTerminalCall(message, panel, secrets) {
+    const { requestId, command, directory, actingAs } = message;
     // A message handler must ALWAYS post a response, even on garbage input --
     // exec() throws synchronously for a non-string command, which previously left
     // the webview's promise waiting forever with no way to ever resolve it.
@@ -205,9 +245,22 @@ function handleTerminalCall(message, panel) {
         panel.webview.postMessage({ type: 'terminalResult', requestId, data: { error: 'No directory specified and no workspace folder is open.' } });
         return;
     }
+    // "Acting as Xenos" scopes ONLY this one command's own process -- gh and git both check
+    // GH_TOKEN/GITHUB_TOKEN before falling back to the machine's own logged-in credential
+    // (gh itself IS the git credential helper github.com is already configured to use), so
+    // this transparently swaps identity for the single exec() call without touching the
+    // system-wide gh login, without the token ever appearing in the command text itself
+    // (which would otherwise leak it into the visible confirm card and saved chat history).
+    let env;
+    if (actingAs === 'xenos' && secrets) {
+        try {
+            const token = await secrets.get(XENOS_GH_TOKEN_KEY);
+            if (token) env = Object.assign({}, process.env, { GH_TOKEN: token, GITHUB_TOKEN: token });
+        } catch {}
+    }
     try {
         const entry = { child: null, stoppedByUser: false };
-        const child = exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        const child = exec(command, { cwd, timeout: 60000, maxBuffer: 1024 * 1024, env }, (err, stdout, stderr) => {
             delete pendingTerminalProcesses[requestId];
             panel.webview.postMessage({
                 type: 'terminalResult', requestId,

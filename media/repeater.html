@@ -240,6 +240,10 @@
             background: var(--yellow); color: #1a1400; font-weight: 600;
             padding: 5px 8px; border-radius: 3px; margin-bottom: 8px; font-size: 11.5px;
         }
+        .confirm-identity-note {
+            background: rgba(255, 43, 109, 0.15); color: var(--glitch-red); font-weight: 600;
+            padding: 5px 8px; border-radius: 3px; margin-bottom: 8px; font-size: 11.5px;
+        }
         .confirm-actions { display: flex; gap: 6px; }
         .confirm-status { font-size: 11px; font-weight: 600; }
         .confirm-status.approved { color: var(--green); }
@@ -586,6 +590,19 @@
                         <div class="ai-tokens" id="aiTokens"></div>
                     </div>
                 </div>
+
+                <div class="tools-section">
+                    <h3>GitHub identity</h3>
+                    <div class="ai-output" id="actingAsHint">
+                        Which GitHub credential git/gh commands use. "You" is whatever's already logged into gh on
+                        this machine. "Xenos" uses a separate token you set with /github, only for that one command's
+                        process -- your own gh login is never touched.
+                    </div>
+                    <div class="mode-toggle" id="actingAsToggle" style="margin-top:8px">
+                        <button class="mode-btn active" id="actingAsYouBtn" title="git/gh commands use your own logged-in GitHub credential">You</button>
+                        <button class="mode-btn" id="actingAsXenosBtn" data-mode="agent" title="git/gh commands use Xenos's own GitHub token, set via /github">Xenos</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -599,6 +616,8 @@
         const tasksMenu = document.getElementById('tasksMenu');
         const askModeBtn = document.getElementById('askModeBtn');
         const agentModeBtn = document.getElementById('agentModeBtn');
+        const actingAsYouBtn = document.getElementById('actingAsYouBtn');
+        const actingAsXenosBtn = document.getElementById('actingAsXenosBtn');
         const chatLogEl = document.getElementById('chatLog');
         const commandMenu = document.getElementById('commandMenu');
         const builderBar = document.getElementById('builderBar');
@@ -645,6 +664,7 @@
             { name: 'api', desc: 'Connect Claude or another AI/API' },
             { name: 'prompt', desc: 'Edit the AI\'s system prompt' },
             { name: 'planner', desc: 'Write a step-by-step plan, with a fallback per step' },
+            { name: 'github', desc: 'Set or clear Xenos\'s own GitHub token' },
         ];
         const BUILDER_META = {
             url: { label: 'Add target URL(s)', placeholder: 'https://example.com/api/endpoint' },
@@ -665,6 +685,7 @@
                 { key: 'step', placeholder: 'Step: e.g. run npm install' },
                 { key: 'fallback', placeholder: 'If this fails... (optional -- default is "ask me")' },
             ] },
+            github: { label: 'Xenos\'s own GitHub token -- stored in this device\'s encrypted credential store, never in regular chat data', isGithubToken: true },
         };
 
         const DEFAULT_SYSTEM_PROMPT = 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing, created by Emperor Xenos. ' +
@@ -755,6 +776,7 @@
         const state = loadState();
         if (!state.mode) state.mode = 'ask';
         if (!state.confirmMode) state.confirmMode = 'automated';
+        if (state.actingAs !== 'xenos') state.actingAs = 'you';
         if (!state.activeChipId.plugins) state.activeChipId.plugins = state.activeChipId.plugins || null;
         if (!state.activeChipId.api) state.activeChipId.api = state.activeChipId.api || null;
         if (state.versionCounters.plugins == null) state.versionCounters.plugins = 0;
@@ -795,6 +817,8 @@
         let torFetchPending = {};   // requestId -> resolve
         let wikipediaPending = {};  // requestId -> resolve
         let apiFetchPending = {};  // requestId -> resolve
+        let githubTokenPending = {}; // requestId -> resolve
+        let githubTokenConfigured = false; // whether Xenos's own GitHub token is set -- never the token value itself
         let pendingConfirms = {};  // confirm entry id -> resolve(approved)
 
         function saveState() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -1111,6 +1135,13 @@
             label.className = 'confirm-label';
             label.textContent = entry.name;
             div.appendChild(label);
+
+            if (entry.actingAsXenos) {
+                const id = document.createElement('div');
+                id.className = 'confirm-identity-note';
+                id.textContent = 'Acting as: Xenos -- uses Xenos\'s own GitHub token for this command, not your login.';
+                div.appendChild(id);
+            }
 
             if (entry.name === 'run_terminal_command' && entry.argsObj && looksLikeDeployCommand(entry.argsObj.command)) {
                 const warn = document.createElement('div');
@@ -1480,6 +1511,7 @@
         }
 
         let promptTextarea = null;
+        let githubTokenInput = null;
 
         // ---------- Builder (compose /url /headers /body /plugins /api) ----------
         let builder = null; // { type, chipId, items }
@@ -1514,7 +1546,7 @@
         }
         function renderBuilderTags() {
             builderTags.innerHTML = '';
-            if (BUILDER_META[builder.type].isPrompt) return;
+            if (BUILDER_META[builder.type].isPrompt || BUILDER_META[builder.type].isGithubToken) return;
             builder.items.forEach((val, idx) => {
                 const tag = document.createElement('div');
                 tag.className = 'builder-tag';
@@ -1532,6 +1564,21 @@
             builderRow.innerHTML = '';
             builderInputs = [];
             promptTextarea = null;
+            githubTokenInput = null;
+            if (meta.isGithubToken) {
+                githubTokenInput = document.createElement('input');
+                githubTokenInput.type = 'password';
+                githubTokenInput.spellcheck = false;
+                githubTokenInput.autocomplete = 'off';
+                githubTokenInput.placeholder = githubTokenConfigured
+                    ? 'Currently set -- paste a new token to replace it, or leave blank + OK to clear'
+                    : 'Paste the token (ghp_...) -- leave blank to keep it unset';
+                githubTokenInput.style.cssText = 'flex:1;background:var(--bg-input);border:1px solid var(--border);color:var(--fg);padding:8px;font-size:12px;font-family:inherit;border-radius:3px;';
+                githubTokenInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); builderOkBtn.click(); } });
+                builderRow.appendChild(githubTokenInput);
+                githubTokenInput.focus();
+                return;
+            }
             if (meta.isPrompt) {
                 promptTextarea = document.createElement('textarea');
                 promptTextarea.value = builder.items[0] || '';
@@ -1581,8 +1628,23 @@
             });
         }
 
-        builderOkBtn.addEventListener('click', () => {
+        builderOkBtn.addEventListener('click', async () => {
             if (!builder) return;
+            if (BUILDER_META[builder.type].isGithubToken) {
+                const value = (githubTokenInput.value || '').trim();
+                closeBuilder();
+                const data = await storeGithubTokenAsync(value);
+                if (data && data.error) {
+                    addChatEntry({ kind: 'note', text: `Could not save the GitHub token: ${data.error}` });
+                    return;
+                }
+                githubTokenConfigured = !!(data && data.configured);
+                renderActingAsToggle();
+                addChatEntry({ kind: 'note', text: githubTokenConfigured
+                    ? 'Xenos\'s GitHub token saved to this device\'s encrypted credential store.'
+                    : 'Xenos\'s GitHub token cleared.' });
+                return;
+            }
             if (BUILDER_META[builder.type].isPrompt) {
                 state.agentHistory[0].content = (promptTextarea.value || '').trim() || DEFAULT_SYSTEM_PROMPT;
                 saveState();
@@ -1704,6 +1766,28 @@
         });
         renderMode();
 
+        // Xenos identity is opt-in and off by default -- falls back to "You" automatically
+        // if the token gets cleared while it was selected, so a stale selection can never
+        // silently try to use a credential that no longer exists.
+        function renderActingAsToggle() {
+            if (!githubTokenConfigured && state.actingAs === 'xenos') { state.actingAs = 'you'; saveState(); }
+            actingAsYouBtn.classList.toggle('active', state.actingAs === 'you');
+            actingAsXenosBtn.classList.toggle('active', state.actingAs === 'xenos');
+            actingAsXenosBtn.disabled = !githubTokenConfigured;
+            actingAsXenosBtn.title = githubTokenConfigured
+                ? 'git/gh commands use Xenos\'s own GitHub token, set via /github'
+                : 'Set a token first with /github to use this';
+        }
+        actingAsYouBtn.addEventListener('click', () => { state.actingAs = 'you'; saveState(); renderActingAsToggle(); });
+        actingAsXenosBtn.addEventListener('click', () => {
+            if (!githubTokenConfigured) return;
+            state.actingAs = 'xenos'; saveState(); renderActingAsToggle();
+        });
+        checkGithubTokenAsync().then(data => {
+            githubTokenConfigured = !!(data && data.configured);
+            renderActingAsToggle();
+        });
+
         async function runAsk(userText) {
             // Ask mode never gets the HTTP/plugin tools (those stay Agent-only), but once
             // authorized it can read/write files and run terminal commands -- the latter
@@ -1823,6 +1907,10 @@
                 const resolve = apiFetchPending[msg.requestId];
                 if (resolve) { delete apiFetchPending[msg.requestId]; resolve(msg.data); }
 
+            } else if (msg.type === 'githubTokenResult' || msg.type === 'githubTokenStatus') {
+                const resolve = githubTokenPending[msg.requestId];
+                if (resolve) { delete githubTokenPending[msg.requestId]; resolve(msg.data); }
+
             } else if (msg.type === 'loadRequest') {
                 loadRawRequest(msg.data);
             }
@@ -1940,7 +2028,7 @@
                     if (currentTerminalRequestId === requestId) currentTerminalRequestId = null;
                     resolve(data);
                 };
-                vscode.postMessage({ type: 'terminalCall', requestId, command, directory });
+                vscode.postMessage({ type: 'terminalCall', requestId, command, directory, actingAs: state.actingAs });
             });
         }
         function callListDevicesAsync() {
@@ -1978,6 +2066,23 @@
                 vscode.postMessage({ type: 'apiFetchCall', requestId, method, url, headers, body });
             });
         }
+        // The raw token only ever travels one direction (webview -> extension host, into
+        // VS Code's encrypted SecretStorage) -- it's never read back into this side, kept in
+        // `state`, or written to localStorage. Passing '' clears whatever was stored.
+        function storeGithubTokenAsync(token) {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                githubTokenPending[requestId] = resolve;
+                vscode.postMessage({ type: 'storeGithubToken', requestId, token });
+            });
+        }
+        function checkGithubTokenAsync() {
+            return new Promise((resolve) => {
+                const requestId = uid();
+                githubTokenPending[requestId] = resolve;
+                vscode.postMessage({ type: 'checkGithubToken', requestId });
+            });
+        }
         // Confirmation gate: renders an Accept/Deny chat entry and waits for the user's click.
         function requestConfirm(call) {
             if (!isAlwaysConfirmTool(call.name)) {
@@ -1993,7 +2098,11 @@
             }
             return new Promise((resolve) => {
                 const id = uid();
-                addChatEntry({ kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), argsObj: parseToolArgs(call.arguments), resolved: false, lockedAlways: isAlwaysConfirmTool(call.name) });
+                addChatEntry({
+                    kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), argsObj: parseToolArgs(call.arguments),
+                    resolved: false, lockedAlways: isAlwaysConfirmTool(call.name),
+                    actingAsXenos: call.name === 'run_terminal_command' && state.actingAs === 'xenos',
+                });
                 pendingConfirms[id] = (approved) => {
                     const entry = state.chatLog.find(e => e.id === id);
                     if (entry) { entry.resolved = true; entry.approved = approved; saveState(); renderChatLog(); }
