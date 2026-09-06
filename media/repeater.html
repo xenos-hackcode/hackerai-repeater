@@ -154,6 +154,12 @@
         .chip .chip-count { color: var(--fg-dim); font-size: 10px; }
 
         .note-row { color: var(--fg-dim); font-size: 11px; padding: 2px 2px; }
+        .note-row-action { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 2px; }
+        .note-action-btn {
+            background: var(--bg-input); border: 1px solid var(--accent); color: var(--accent);
+            padding: 4px 12px; border-radius: 14px; font-size: 11px; cursor: pointer; flex-shrink: 0;
+        }
+        .note-action-btn:hover { background: var(--accent); color: #fff; }
         .step-row {
             color: var(--fg-dim); font-size: 10.5px; padding: 3px 8px;
             border-left: 2px solid var(--neon); background: rgba(0,255,156,0.04);
@@ -818,7 +824,7 @@
             }
             visible.forEach(entry => {
                 if (entry.kind === 'chip') chatLogEl.appendChild(renderChip(entry));
-                else if (entry.kind === 'note') { const d = document.createElement('div'); d.className = 'note-row'; d.textContent = entry.text; chatLogEl.appendChild(d); }
+                else if (entry.kind === 'note') { chatLogEl.appendChild(renderNote(entry)); }
                 else if (entry.kind === 'step') { const d = document.createElement('div'); d.className = 'step-row'; d.textContent = entry.text; chatLogEl.appendChild(d); }
                 else if (entry.kind === 'result') chatLogEl.appendChild(renderResultEntry(entry));
                 else if (entry.kind === 'confirm') chatLogEl.appendChild(renderConfirmEntry(entry));
@@ -862,6 +868,11 @@
         // repo for me") can't make the model blindly retry the exact same fabricated path a
         // second time in a new turn -- cleared on New Task / switching tasks in applyTaskSnapshot.
         let knownBadDirectories = new Set();
+        // One-time-per-task nudge to start a New Task before things get slow/confused, not
+        // after -- a long task means every turn re-evaluates a bigger prompt on a CPU-bound
+        // model (slow, can time out), and mixing unrelated work in one task risks it echoing
+        // a fabricated detail from an earlier, unrelated part of the same conversation.
+        let hintedLongTask = false;
         // Hard stop: unlike an interjection (which the model reads and may or may not act
         // on), Stop halts the loop itself deterministically -- no more tool calls execute,
         // any pending confirm is auto-denied, and the in-flight LLM call / terminal command
@@ -919,6 +930,28 @@
         }
         planStopBtn.addEventListener('click', requestStop);
 
+        // A note can optionally carry an action (currently just 'newTask') that renders as a
+        // real button instead of leaving the user to go find Tasks -> New task themselves --
+        // same idea as ChatGPT surfacing a direct action when a conversation gets long.
+        function renderNote(entry) {
+            if (entry.action === 'newTask') {
+                const d = document.createElement('div');
+                d.className = 'note-row-action';
+                const span = document.createElement('span');
+                span.textContent = entry.text;
+                const btn = document.createElement('button');
+                btn.className = 'note-action-btn';
+                btn.textContent = 'New task';
+                btn.addEventListener('click', startNewTask);
+                d.appendChild(span);
+                d.appendChild(btn);
+                return d;
+            }
+            const d = document.createElement('div');
+            d.className = 'note-row';
+            d.textContent = entry.text;
+            return d;
+        }
         function renderMsg(entry) {
             const row = document.createElement('div');
             row.className = 'msg-row ' + entry.kind;
@@ -1273,6 +1306,7 @@
             state.activeChipId.body = snapshot.activeChipId.body;
             state.showOutput = snapshot.showOutput;
             knownBadDirectories.clear();
+            hintedLongTask = false;
         }
         function blankTask() {
             return {
@@ -2051,6 +2085,16 @@
             // in the other; this index is the only reliable link between them.
             addChatEntry({ kind: 'user', text: userText, historyIndex: state.agentHistory.length });
             state.agentHistory.push({ role: 'user', content: userText });
+            // One-time nudge, well before auto-compact kicks in -- a long task both runs
+            // slower (a bigger prompt to re-evaluate on CPU every turn) and risks mixing up
+            // unrelated topics in the same context.
+            if (!hintedLongTask && (state.agentHistory.length > 10 || estimateHistoryChars() > 6000)) {
+                hintedLongTask = true;
+                addChatEntry({
+                    kind: 'note', action: 'newTask',
+                    text: 'This task is getting long -- if your next ask is about something unrelated, starting fresh keeps replies faster and avoids mixing up context.',
+                });
+            }
             setThinking(true);
             if (state.agentHistory.length > 24 || estimateHistoryChars() > 20000) await compactAgentHistory(true);
             turnRunning = true;
