@@ -618,7 +618,15 @@
             'an honest failure report, because the user will believe it and move on without fixing the real problem. ' +
             'run_terminal_command takes an optional "directory" argument (an absolute path) -- always pass it explicitly when the user ' +
             'is asking about a project other than the one currently open, including for git/gh commands (clone, push, delete a repo, etc.); ' +
-            'never assume the currently open folder is the right one for a command about a different named project. ' +
+            'never assume the currently open folder is the right one for a command about a different named project. Only use a directory ' +
+            'you actually know (from earlier in the conversation, or the one currently open) -- never invent or guess one by combining ' +
+            'words from the user\'s sentence (a name like "casino" is not a path); if you do not know the real path, ask for it. ' +
+            'set_url/set_headers/set_body/send_request are ONLY for the manual HTTP repeater feature -- never use them for git, GitHub, or ' +
+            'any other non-HTTP-repeater task. For creating a new GitHub repo and pushing to it, prefer one single ' +
+            '`gh repo create <org>/<name> --public --source=. --remote=origin --push` call over separate git init/remote add/push steps -- ' +
+            'it does the whole thing at once and needs every flag specified up front since there is no interactive terminal to answer a ' +
+            'prompt from a half-specified command. If the exact same command fails twice in a row, that is a signal to stop and ask or ' +
+            'investigate, not to try it again unchanged. ' +
             'Terminal commands run on Windows through cmd.exe, not bash -- use double quotes for any argument with spaces (e.g. ' +
             'git commit -m "a message"), never single quotes, since cmd.exe treats a single quote as a plain character and will split ' +
             'the argument into multiple words instead of one. Put the directory in the "directory" argument itself, never as text ' +
@@ -1765,6 +1773,8 @@
             stopRequested = false;
             renderSendBtn();
             let lastFailureDetail = null;
+            let lastFailedCallKey = null;
+            let identicalFailureStreak = 0;
             try {
             let iterations = 0;
             const MAX_TOOL_ITERATIONS = 40; // long enough for a real multi-step task (e.g. attack -> diagnose -> patch -> retest); dangerous actions still always confirm regardless of this cap.
@@ -1818,6 +1828,31 @@
                         logStep(`${call.name} -> ${JSON.stringify(toolResult).slice(0, 200)}`);
                         state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
                         lastFailureDetail = toolResultFailureDetail(toolResult);
+
+                        // A model this small will sometimes retry the exact same failing call
+                        // over and over (same tool, same arguments) instead of stopping to
+                        // investigate or ask -- caught the same way false-success reports are:
+                        // a real check on the actual results, not just a prompt asking it not to.
+                        const callKey = call.name + '::' + argsPreview(call.arguments);
+                        if (lastFailureDetail) {
+                            identicalFailureStreak = (callKey === lastFailedCallKey) ? identicalFailureStreak + 1 : 1;
+                            lastFailedCallKey = callKey;
+                            if (identicalFailureStreak >= 2) {
+                                state.agentHistory.push({
+                                    role: 'user',
+                                    content: `(The exact same ${call.name} call just failed the same way twice in a row: ${lastFailureDetail}. ` +
+                                        `Retrying it again with the same arguments will not work. Stop and either investigate the real cause ` +
+                                        `with a read-only tool (e.g. list_directory), or ask a short clarifying question instead of calling it ` +
+                                        `again unchanged.)`,
+                                });
+                                identicalFailureStreak = 0;
+                                lastFailedCallKey = null;
+                                break; // let the model respond to the correction instead of piling on more calls from this batch
+                            }
+                        } else {
+                            identicalFailureStreak = 0;
+                            lastFailedCallKey = null;
+                        }
                     }
                     saveState();
                     continue;
