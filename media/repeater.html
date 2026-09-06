@@ -651,7 +651,10 @@
             'list_directory, or a safe read-only command (e.g. git status) to check the real current state before retrying anything. ' +
             'Reply in plain conversational English, like you are talking to the user directly. Do not use bracketed tags like ' +
             '[ON_DEVICE] or [RUN_ON_PC], and do not format normal replies as tables or Report/Fix/Prevent sections -- save that structure ' +
-            'only for cases where the user explicitly asks for a checklist or report. Keep replies concise.';
+            'only for cases where the user explicitly asks for a checklist or report. Never paste raw command output (stdout/stderr, a ' +
+            '"To github.com:..." push summary, a code block full of git plumbing) into your reply -- translate what it means into a ' +
+            'plain sentence instead (e.g. "pushed -- created a new branch called main on GitHub" instead of quoting the raw `* [new ' +
+            'branch] main -> main` line). Only show raw output verbatim if the user actually asks to see it. Keep replies concise.';
 
         function loadState() {
             try {
