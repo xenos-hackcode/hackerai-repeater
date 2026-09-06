@@ -238,6 +238,14 @@
         .confirm-status { font-size: 11px; font-weight: 600; }
         .confirm-status.approved { color: var(--green); }
         .confirm-status.denied { color: var(--red); }
+        .confirm-split { position: relative; display: flex; }
+        .confirm-split .text-btn { border-radius: 3px 0 0 3px; }
+        .confirm-caret { border-radius: 0 3px 3px 0 !important; padding: 5px 6px !important; border-left: none !important; }
+        .confirm-dropdown {
+            position: absolute; top: 100%; left: 0; margin-top: 2px;
+            width: 170px; z-index: 20;
+        }
+        .confirm-dropdown.hidden { display: none; }
 
         /* Command menu */
         .command-menu {
@@ -735,6 +743,7 @@
                     content: DEFAULT_SYSTEM_PROMPT,
                 }],
                 sessions: [],
+                toolTrust: {},
             };
         }
         const state = loadState();
@@ -748,6 +757,25 @@
             state.agentHistory = [{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }];
         }
         if (!Array.isArray(state.sessions)) state.sessions = [];
+        if (!state.toolTrust || typeof state.toolTrust !== 'object') state.toolTrust = {};
+        // In-memory only ("this session") trust, separate from state.toolTrust ("always") --
+        // never persisted, so it naturally resets on reload. run_terminal_command and
+        // tor_fetch are deliberately never eligible for either kind of trust; they always
+        // confirm, full stop -- see needsConfirm in runChatTurn and renderConfirmEntry below.
+        let sessionToolTrust = {};
+        function getToolTrust(name) {
+            if (name in sessionToolTrust) return sessionToolTrust[name];
+            if (name in state.toolTrust) return state.toolTrust[name];
+            return null;
+        }
+        function setToolTrust(name, decision, scope) {
+            if (scope === 'always') { state.toolTrust[name] = decision; saveState(); }
+            else { sessionToolTrust[name] = decision; }
+        }
+        // The one hard rule with no opt-out anywhere in the app: these two always confirm,
+        // regardless of AI action mode or any allow/deny trust the user has set for anything
+        // else. Never add a tool here lightly, and never let trust bypass it.
+        function isAlwaysConfirmTool(name) { return name === 'run_terminal_command' || name === 'tor_fetch'; }
         let lastResponseForAI = null;
         let pendingRequests = {};   // requestId -> { entryId, index }
         let entryResolvers = {};   // entryId -> resolve callback (used by the agent's send_request tool)
@@ -1016,6 +1044,33 @@
             if (typeof command !== 'string') return false;
             return /\b(firebase\s+deploy|vercel(\s+deploy)?\s+--prod|netlify\s+deploy\s+--prod|git\s+push\s+heroku|kubectl\s+apply|docker\s+push|npm\s+publish|gh\s+release\s+create|terraform\s+apply|gcloud\s+(app|run|functions)\s+deploy|eb\s+deploy|serverless\s+deploy|railway\s+(up|deploy)|flyctl?\s+deploy|wrangler\s+deploy|az\s+webapp\s+.*deploy)\b/i.test(command);
         }
+        // A main button (immediate "once") plus a caret that reveals "this session" / "always"
+        // -- used for every tool EXCEPT run_terminal_command/tor_fetch, which never get this
+        // (see isAlwaysConfirmTool). onPick receives 'once' | 'session' | 'always'.
+        function renderSplitConfirmButton(label, extraClass, onPick) {
+            const wrap = document.createElement('div');
+            wrap.className = 'confirm-split';
+            const main = document.createElement('button');
+            main.className = 'text-btn ' + extraClass;
+            main.textContent = label;
+            main.addEventListener('click', () => onPick('once'));
+            const caret = document.createElement('button');
+            caret.className = 'text-btn confirm-caret ' + extraClass;
+            caret.title = `More "${label}" options`;
+            caret.innerHTML = '<svg class="icon" viewBox="0 0 24 24" style="width:10px;height:10px"><path d="M6 9l6 6 6-6"/></svg>';
+            const menu = document.createElement('div');
+            menu.className = 'command-menu confirm-dropdown hidden';
+            [['once', label + ' once'], ['session', label + ' for this session'], ['always', label + ' always']].forEach(([scope, text]) => {
+                const item = document.createElement('div');
+                item.className = 'command-item';
+                item.innerHTML = `<span class="cmd-name">${text}</span>`;
+                item.addEventListener('click', () => { menu.classList.add('hidden'); onPick(scope); });
+                menu.appendChild(item);
+            });
+            caret.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); });
+            wrap.appendChild(main); wrap.appendChild(caret); wrap.appendChild(menu);
+            return wrap;
+        }
         function renderConfirmEntry(entry) {
             const div = document.createElement('div');
             div.className = 'confirm-entry';
@@ -1064,13 +1119,24 @@
             } else {
                 const actions = document.createElement('div');
                 actions.className = 'confirm-actions';
-                const acceptBtn = document.createElement('button');
-                acceptBtn.className = 'text-btn primary'; acceptBtn.textContent = 'Accept';
-                acceptBtn.addEventListener('click', () => pendingConfirms[entry.id] && pendingConfirms[entry.id](true));
-                const denyBtn = document.createElement('button');
-                denyBtn.className = 'text-btn'; denyBtn.textContent = 'Deny';
-                denyBtn.addEventListener('click', () => pendingConfirms[entry.id] && pendingConfirms[entry.id](false));
-                actions.appendChild(acceptBtn); actions.appendChild(denyBtn);
+                if (entry.lockedAlways) {
+                    // run_terminal_command / tor_fetch: no dropdown, no trust, ever -- just
+                    // the plain once-only choice, matching the hard always-confirm rule.
+                    const allowBtn = document.createElement('button');
+                    allowBtn.className = 'text-btn primary'; allowBtn.textContent = 'Allow';
+                    allowBtn.addEventListener('click', () => pendingConfirms[entry.id] && pendingConfirms[entry.id](true));
+                    const denyBtn = document.createElement('button');
+                    denyBtn.className = 'text-btn'; denyBtn.textContent = 'Deny';
+                    denyBtn.addEventListener('click', () => pendingConfirms[entry.id] && pendingConfirms[entry.id](false));
+                    actions.appendChild(allowBtn); actions.appendChild(denyBtn);
+                } else {
+                    const resolveWith = (approved, scope) => {
+                        if (scope !== 'once') setToolTrust(entry.name, approved ? 'allow' : 'deny', scope);
+                        pendingConfirms[entry.id] && pendingConfirms[entry.id](approved);
+                    };
+                    actions.appendChild(renderSplitConfirmButton('Allow', 'primary', (scope) => resolveWith(true, scope)));
+                    actions.appendChild(renderSplitConfirmButton('Deny', '', (scope) => resolveWith(false, scope)));
+                }
                 div.appendChild(actions);
             }
             return div;
@@ -1327,6 +1393,20 @@
                 hideTasksMenu();
             });
             tasksMenu.appendChild(clearItem);
+
+            const trustCount = Object.keys(state.toolTrust).length + Object.keys(sessionToolTrust).length;
+            if (trustCount > 0) {
+                const resetTrustItem = document.createElement('div');
+                resetTrustItem.className = 'command-item';
+                resetTrustItem.innerHTML = `<span class="cmd-name">Reset tool permissions</span><span class="cmd-desc">Clear ${trustCount} saved allow/deny choice${trustCount === 1 ? '' : 's'} -- back to asking every time</span>`;
+                resetTrustItem.addEventListener('click', () => {
+                    state.toolTrust = {};
+                    sessionToolTrust = {};
+                    saveState();
+                    hideTasksMenu();
+                });
+                tasksMenu.appendChild(resetTrustItem);
+            }
 
             state.sessions.forEach(s => {
                 const item = document.createElement('div');
@@ -1866,9 +1946,20 @@
         }
         // Confirmation gate: renders an Accept/Deny chat entry and waits for the user's click.
         function requestConfirm(call) {
+            if (!isAlwaysConfirmTool(call.name)) {
+                const trust = getToolTrust(call.name);
+                if (trust === 'allow') {
+                    addChatEntry({ kind: 'note', text: `${call.name} auto-approved (you set "always allow" for it)` });
+                    return Promise.resolve(true);
+                }
+                if (trust === 'deny') {
+                    addChatEntry({ kind: 'note', text: `${call.name} auto-denied (you set "always deny" for it)` });
+                    return Promise.resolve(false);
+                }
+            }
             return new Promise((resolve) => {
                 const id = uid();
-                addChatEntry({ kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), argsObj: parseToolArgs(call.arguments), resolved: false });
+                addChatEntry({ kind: 'confirm', id, name: call.name, args: argsPreview(call.arguments), argsObj: parseToolArgs(call.arguments), resolved: false, lockedAlways: isAlwaysConfirmTool(call.name) });
                 pendingConfirms[id] = (approved) => {
                     const entry = state.chatLog.find(e => e.id === id);
                     if (entry) { entry.resolved = true; entry.approved = approved; saveState(); renderChatLog(); }
@@ -2009,7 +2100,7 @@
                             state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Stopped by user' }) });
                             continue;
                         }
-                        const needsConfirm = state.confirmMode === 'manual' || call.name === 'run_terminal_command' || call.name === 'tor_fetch';
+                        const needsConfirm = state.confirmMode === 'manual' || isAlwaysConfirmTool(call.name);
                         if (needsConfirm) {
                             const approved = await requestConfirm(call);
                             if (!approved) {
