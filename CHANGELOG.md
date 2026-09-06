@@ -214,17 +214,29 @@ All notable changes to HackerAI Repeater, newest first.
 
 ## Findings worth keeping, not tied to one version
 
-**GitHub's "Built by Claude" badge is tied to which agent performs a push, not
-commit content.** Confirmed by testing directly: pushing the `casino` project
-to a fresh GitHub repo via Xenos (through `run_terminal_command`, approved
-step by step) produced no "Built by Claude" badge, on an account where
-earlier pushes performed by Claude Code itself did show it. The commits
-themselves carried no Claude attribution either way — the difference is
-which tool actually executed the `git`/`gh` calls, not what's in the
-repository. Repos still flagged from before this test: webrtc,
-Elene-Sifilaucher, isio-afar, miv-, hacker-x-globe (and hackerai-repeater
-itself, whose pushes this whole project has gone through Claude Code
-directly, with `Co-Authored-By: Claude` on its own commits by design).
+**GitHub's "Built by Claude" badge tracks the commit message content, not
+which agent performed the push — corrected from an earlier, premature
+conclusion.** First round of testing (casino, webrtc — both pushed via Xenos
+through `run_terminal_command`, approved step by step) showed no badge, which
+looked like it confirmed "the badge is tied to which tool pushed it." But
+both of those commits happened to carry zero Claude attribution of any kind,
+for unrelated reasons. The real test came next: `isio-afar`, also pushed via
+Xenos, but its existing commit message already contained
+`Co-Authored-By: Claude Sonnet 4.6` from when it was first created — and it
+**did** show the badge. Same pushing tool, different outcome, only variable
+that changed was the commit message itself. That's a much better-supported
+explanation: GitHub is almost certainly scanning commit messages for an
+AI-attribution trailer (`Co-Authored-By: Claude`, and likely `Generated with
+Claude Code` / similar) and badging based on that, regardless of who ran
+`git push`. Checked the two remaining untested repos on this basis before
+touching them: `church` (`miv-`) has 8 commits with
+`Co-Authored-By: Claude Sonnet 5` baked in — expect the badge there
+regardless of which tool pushes it, unless those commit messages get
+rewritten first. `SciFiLauncher` (`Elene-Sifilaucher`) is genuinely clean (a
+`.claude`-as-gitignored-folder-name false match aside) and should behave like
+casino/webrtc. Still untested: `hacker-x-globe` (has uncommitted local
+changes to resolve first) and `hackerai-repeater` itself, whose commits carry
+`Co-Authored-By: Claude` throughout by design.
 
 **The original 110K-example fine-tuning dataset has zero tool-calling
 examples.** It's single-turn `{instruction, output}` security-writing
