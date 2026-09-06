@@ -2,6 +2,13 @@
 
 All notable changes to HackerAI Repeater, newest first.
 
+## 1.7.1
+- The Accept/Deny confirm card now shows a distinct yellow warning when the
+  command being approved looks like a production deploy (`firebase deploy`,
+  `vercel`/`netlify --prod`, `docker push`, `npm publish`, `kubectl apply`,
+  `terraform apply`, `gh release create`, and similar) — a bigger deal than a
+  routine terminal command, since it can go live for real users.
+
 ## 1.7.0
 - Added `/planner`: build a step-by-step plan where each step also has a
   "what to do if this fails" instruction. On submit it's composed into one
