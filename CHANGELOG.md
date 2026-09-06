@@ -2,6 +2,23 @@
 
 All notable changes to HackerAI Repeater, newest first.
 
+## 1.8.0
+- New `/github` command stores a separate GitHub token for Xenos in VS
+  Code's real `SecretStorage` (OS-level encrypted keychain), not the plain
+  localStorage the rest of the extension's state lives in — the raw token
+  is write-only from the webview side, never read back or saved to chat
+  history.
+- Added an "Acting as: You / Acting as: Xenos" toggle (Tools → GitHub
+  identity). Scopes only the current terminal command's own process via a
+  `GH_TOKEN`/`GITHUB_TOKEN` env var override — the system-wide `gh` login is
+  never touched, and the token never appears in the command text itself.
+  Disabled until a token is configured; falls back to "You" automatically
+  if the token is cleared while selected. The confirm card shows "Acting
+  as: Xenos" directly on any command that will use it.
+- Both identities are pure user configuration — nothing hardcoded to a
+  specific account, so this works the same way for anyone installing the
+  extension.
+
 ## 1.7.3
 - Added a one-time-per-task hint, well before auto-compaction kicks in, when
   a task is getting long — with a real "New task" button attached (same
