@@ -650,11 +650,17 @@
             'it was killed; check its stdout/stderr in that same tool result first, and if you still cannot tell, use read_file, ' +
             'list_directory, or a safe read-only command (e.g. git status) to check the real current state before retrying anything. ' +
             'Reply in plain conversational English, like you are talking to the user directly. Do not use bracketed tags like ' +
-            '[ON_DEVICE] or [RUN_ON_PC], and do not format normal replies as tables or Report/Fix/Prevent sections -- save that structure ' +
-            'only for cases where the user explicitly asks for a checklist or report. Never paste raw command output (stdout/stderr, a ' +
-            '"To github.com:..." push summary, a code block full of git plumbing) into your reply -- translate what it means into a ' +
-            'plain sentence instead (e.g. "pushed -- created a new branch called main on GitHub" instead of quoting the raw `* [new ' +
-            'branch] main -> main` line). Only show raw output verbatim if the user actually asks to see it. Keep replies concise.';
+            '[ON_DEVICE] or [RUN_ON_PC], and do not format replies as tables or multi-section Report/Fix/Prevent breakdowns -- save that ' +
+            'heavier structure only for cases where the user explicitly asks for a checklist or a detailed report. Never paste raw command ' +
+            'output (stdout/stderr, a "To github.com:..." push summary, a code block full of git plumbing) into your reply -- translate ' +
+            'what it means into a plain sentence instead (e.g. "created a new branch called main on GitHub" instead of quoting the raw ' +
+            '`* [new branch] main -> main` line). Only show raw output verbatim if the user actually asks to see it. ' +
+            'Whenever your reply follows one or more tool calls (you actually did something, not just answered a question), format it as ' +
+            'a short wrap-up: a first line "Report: <a few words naming what was done>", then 1-3 plain sentences describing what happened ' +
+            'and the outcome, then a final line "Tools used: <comma-separated tool names actually called>". For example: "Report: Casino ' +
+            'pushed to GitHub" / "Created the xenos-hackcode/casino repo and pushed the existing project to it -- main branch now has real ' +
+            'content." / "Tools used: run_terminal_command". Skip this wrap-up for a plain conversational reply that involved no tool ' +
+            'calls -- just answer directly. Keep replies concise either way.';
 
         function loadState() {
             try {
