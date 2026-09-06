@@ -2,6 +2,16 @@
 
 All notable changes to HackerAI Repeater, newest first.
 
+## 1.7.2
+- Confirm cards for every tool except `run_terminal_command`/`tor_fetch` now
+  have Allow/Deny split buttons with a dropdown: once, for this session, or
+  always. A remembered choice auto-resolves future calls to that tool with a
+  visible note instead of showing the card again. Terminal commands and Tor
+  fetches are hard-exempted — they only ever get plain once-only buttons, no
+  dropdown, matching the always-confirm rule that's been unconditional all
+  project. Added "Reset tool permissions" to the Tasks menu as the way to
+  undo an always/session choice.
+
 ## 1.7.1
 - The Accept/Deny confirm card now shows a distinct yellow warning when the
   command being approved looks like a production deploy (`firebase deploy`,
