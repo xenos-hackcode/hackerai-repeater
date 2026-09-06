@@ -1394,8 +1394,13 @@
         // Rough size check so a handful of huge tool outputs (a verbose git/npm command,
         // a big file read) triggers compaction even while the message COUNT stays low --
         // large context is what actually slows a CPU-bound model down turn to turn.
+        // Deliberately excludes agentHistory[0] (the system prompt): that's fixed overhead
+        // present from message zero of every task, not something conversation length grew --
+        // counting it made the "getting long" hint fire on the very first message of a brand
+        // new task, since the system prompt alone (7500+ characters) already exceeded the
+        // hint's own threshold before any real conversation existed.
         function estimateHistoryChars() {
-            return state.agentHistory.reduce((sum, m) => {
+            return state.agentHistory.slice(1).reduce((sum, m) => {
                 return sum + (m.content ? m.content.length : 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0);
             }, 0);
         }
