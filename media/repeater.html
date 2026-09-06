@@ -343,6 +343,31 @@
         .text-btn.primary:hover { filter: brightness(1.15); }
         .text-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+        /* Active-plan banner, shown above the input bar while a /planner task is running */
+        .plan-banner {
+            display: flex; align-items: center; gap: 8px;
+            margin: 0 10px; padding: 6px 10px;
+            background: rgba(78, 201, 176, 0.1);
+            border: 1px solid var(--green);
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            font-size: 12px; color: var(--green);
+        }
+        .plan-banner.hidden { display: none; }
+        .plan-banner-dot {
+            width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0;
+            animation: plan-pulse 1.4s ease-in-out infinite;
+        }
+        @keyframes plan-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+        .plan-banner span:nth-child(2) { flex: 1; }
+        #planStopBtn {
+            display: flex; align-items: center; gap: 4px;
+            background: none; border: 1px solid var(--green); color: var(--green);
+            border-radius: 3px; padding: 3px 8px; font-size: 11px; cursor: pointer;
+        }
+        #planStopBtn:hover { background: rgba(78, 201, 176, 0.18); }
+        #planStopBtn .icon { width: 12px; height: 12px; stroke: var(--green); }
+
         /* Full-screen views (results / tools) */
         .fullscreen-view {
             position: absolute; inset: 0;
@@ -460,6 +485,14 @@
             </div>
 
             <div class="command-menu" id="confirmMenu" hidden></div>
+            <div class="plan-banner hidden" id="planBanner">
+                <span class="plan-banner-dot"></span>
+                <span>Plan is active</span>
+                <button id="planStopBtn" title="Stop the plan">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+                    Stop
+                </button>
+            </div>
             <div class="input-bar" id="inputBar">
                 <button class="round-btn" id="plusBtn" title="Commands">
                     <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -563,6 +596,8 @@
         const sendBtn = document.getElementById('sendBtn');
         const confirmModeBtn = document.getElementById('confirmModeBtn');
         const confirmMenu = document.getElementById('confirmMenu');
+        const planBanner = document.getElementById('planBanner');
+        const planStopBtn = document.getElementById('planStopBtn');
         const resultsView = document.getElementById('resultsView');
         const toolsView = document.getElementById('toolsView');
         const fsTitle = document.getElementById('fsTitle');
@@ -591,6 +626,7 @@
             { name: 'plugins', desc: 'Link external tool plugins' },
             { name: 'api', desc: 'Connect Claude or another AI/API' },
             { name: 'prompt', desc: 'Edit the AI\'s system prompt' },
+            { name: 'planner', desc: 'Write a step-by-step plan, with a fallback per step' },
         ];
         const BUILDER_META = {
             url: { label: 'Add target URL(s)', placeholder: 'https://example.com/api/endpoint' },
@@ -607,6 +643,10 @@
                 { key: 'model', placeholder: 'Model override (optional)' },
             ] },
             prompt: { label: 'Edit the system prompt -- applies to every reply on this device from now on', isPrompt: true },
+            planner: { label: 'Add a plan step -- and what to do if it fails', isPlanner: true, fields: [
+                { key: 'step', placeholder: 'Step: e.g. run npm install' },
+                { key: 'fallback', placeholder: 'If this fails... (optional -- default is "ask me")' },
+            ] },
         };
 
         const DEFAULT_SYSTEM_PROMPT = 'You are Xenos, an AI assistant embedded in a VS Code HTTP repeater tool for authorized security testing, created by Emperor Xenos. ' +
@@ -726,6 +766,7 @@
             if (typeof item === 'string') return item;
             if (type === 'plugins') return item.name || item.url || 'plugin';
             if (type === 'api') return item.name || 'API';
+            if (type === 'planner') return item.step || 'step';
             return JSON.stringify(item);
         }
 
@@ -778,6 +819,7 @@
         // (after the tool call it's currently running finishes), and decides then whether to
         // act on it immediately or finish the current step first.
         let turnRunning = false;
+        let activePlanRunning = false; // set for the duration of a turn that was started via /planner
         let pendingInterjections = [];
         // Directories confirmed not to exist this task, so a fresh user message ("create the
         // repo for me") can't make the model blindly retry the exact same fabricated path a
@@ -835,6 +877,10 @@
                 sendBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" stroke="#fff"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>';
             }
         }
+        function renderPlanBanner() {
+            planBanner.classList.toggle('hidden', !(turnRunning && activePlanRunning));
+        }
+        planStopBtn.addEventListener('click', requestStop);
 
         function renderMsg(entry) {
             const row = document.createElement('div');
@@ -1149,6 +1195,16 @@
             };
         }
         function startNewTask() {
+            // Switching the visible chatLog/agentHistory out from under a live runChatTurn
+            // loop would corrupt both the task being archived and the new blank one -- the
+            // loop keeps pushing into whatever state.chatLog/agentHistory point to right now,
+            // with no idea a switch happened. Safe fix until background tasks are supported
+            // properly: block the switch instead of racing it.
+            if (turnRunning) {
+                addChatEntry({ kind: 'note', text: 'A task is still running -- stop it or wait for it to finish before starting a new one.' });
+                hideTasksMenu();
+                return;
+            }
             if (state.chatLog.length > 0) {
                 const snap = taskScopedSnapshot();
                 state.sessions.unshift({ id: uid(), savedAt: Date.now(), title: taskTitle(snap), ...snap });
@@ -1160,6 +1216,11 @@
             hideTasksMenu();
         }
         function switchToTask(sessionId) {
+            if (turnRunning) {
+                addChatEntry({ kind: 'note', text: 'A task is still running -- stop it or wait for it to finish before switching tasks.' });
+                hideTasksMenu();
+                return;
+            }
             const sessions = state.sessions.slice();
             const targetIdx = sessions.findIndex(s => s.id === sessionId);
             if (targetIdx === -1) return;
@@ -1232,6 +1293,11 @@
             clearItem.className = 'command-item';
             clearItem.innerHTML = '<span class="cmd-name">Clear this task</span><span class="cmd-desc">Wipe it -- not saved, unlike New task</span>';
             clearItem.addEventListener('click', () => {
+                if (turnRunning) {
+                    addChatEntry({ kind: 'note', text: 'A task is still running -- stop it or wait for it to finish before clearing it.' });
+                    hideTasksMenu();
+                    return;
+                }
                 applyTaskSnapshot(blankTask());
                 saveState();
                 renderChatLog();
@@ -1387,6 +1453,25 @@
                 saveState();
                 renderChatLog();
                 closeBuilder();
+                return;
+            }
+            if (BUILDER_META[builder.type].isPlanner) {
+                builderAddCurrent();
+                const steps = builder.items.filter(it => it.step && it.step.trim());
+                closeBuilder();
+                if (!steps.length) return;
+                const lines = [
+                    'Here is a step-by-step plan. Follow it in order. For each step, if it fails, do exactly what I ' +
+                    'specify instead of guessing or stopping to ask.',
+                    '',
+                ];
+                steps.forEach((s, i) => {
+                    lines.push(`Step ${i + 1}: ${s.step.trim()}`);
+                    lines.push(`If step ${i + 1} fails: ${(s.fallback && s.fallback.trim()) || 'stop and ask me what to do'}`);
+                    lines.push('');
+                });
+                activePlanRunning = true;
+                sendUserText(lines.join('\n').trim());
                 return;
             }
             builderAddCurrent();
@@ -1857,6 +1942,7 @@
             turnRunning = true;
             stopRequested = false;
             renderSendBtn();
+            renderPlanBanner();
             let lastFailureDetail = null;
             let lastFailedCallKey = null;
             let identicalFailureStreak = 0;
@@ -1991,7 +2077,9 @@
             } finally {
                 turnRunning = false;
                 stopRequested = false;
+                activePlanRunning = false;
                 renderSendBtn();
+                renderPlanBanner();
             }
         }
 
