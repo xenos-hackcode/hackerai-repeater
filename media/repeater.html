@@ -230,6 +230,10 @@
         .confirm-field { display: flex; gap: 6px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; word-break: break-word; }
         .confirm-field-key { color: var(--fg-dim); flex-shrink: 0; }
         .confirm-field-val { color: var(--fg); white-space: pre-wrap; }
+        .confirm-deploy-warning {
+            background: var(--yellow); color: #1a1400; font-weight: 600;
+            padding: 5px 8px; border-radius: 3px; margin-bottom: 8px; font-size: 11.5px;
+        }
         .confirm-actions { display: flex; gap: 6px; }
         .confirm-status { font-size: 11px; font-weight: 600; }
         .confirm-status.approved { color: var(--green); }
@@ -673,6 +677,11 @@
             'it does the whole thing at once and needs every flag specified up front since there is no interactive terminal to answer a ' +
             'prompt from a half-specified command. If the exact same command fails twice in a row, that is a signal to stop and ask or ' +
             'investigate, not to try it again unchanged. ' +
+            'A command that deploys somewhere real (firebase deploy, vercel/netlify --prod, docker push, npm publish, kubectl apply, ' +
+            'terraform apply, gh release create, and similar) is a bigger deal than a routine command -- it can go live for real users, ' +
+            'not just run locally. You still call the tool directly like anything else (the approval prompt already warns loudly for ' +
+            'these), but be precise in what you say about it before and after: name what is actually being deployed and to where, and ' +
+            'never describe a deploy as done unless the tool result actually confirms it succeeded. ' +
             'Terminal commands run on Windows through cmd.exe, not bash -- use double quotes for any argument with spaces (e.g. ' +
             'git commit -m "a message"), never single quotes, since cmd.exe treats a single quote as a plain character and will split ' +
             'the argument into multiple words instead of one. Put the directory in the "directory" argument itself, never as text ' +
@@ -1000,6 +1009,13 @@
         }
 
         function fieldLabel(key) { return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '); }
+        // Recognizes a command that pushes something live rather than just querying/building
+        // locally -- these get a louder warning than a routine terminal confirm, since
+        // approving one on autopilot the way you'd approve "npm install" has real consequences.
+        function looksLikeDeployCommand(command) {
+            if (typeof command !== 'string') return false;
+            return /\b(firebase\s+deploy|vercel(\s+deploy)?\s+--prod|netlify\s+deploy\s+--prod|git\s+push\s+heroku|kubectl\s+apply|docker\s+push|npm\s+publish|gh\s+release\s+create|terraform\s+apply|gcloud\s+(app|run|functions)\s+deploy|eb\s+deploy|serverless\s+deploy|railway\s+(up|deploy)|flyctl?\s+deploy|wrangler\s+deploy|az\s+webapp\s+.*deploy)\b/i.test(command);
+        }
         function renderConfirmEntry(entry) {
             const div = document.createElement('div');
             div.className = 'confirm-entry';
@@ -1007,6 +1023,13 @@
             label.className = 'confirm-label';
             label.textContent = entry.name;
             div.appendChild(label);
+
+            if (entry.name === 'run_terminal_command' && entry.argsObj && looksLikeDeployCommand(entry.argsObj.command)) {
+                const warn = document.createElement('div');
+                warn.className = 'confirm-deploy-warning';
+                warn.textContent = '⚠ This looks like a production deploy -- it may go live for real users, not just run locally.';
+                div.appendChild(warn);
+            }
 
             const fields = document.createElement('div');
             fields.className = 'confirm-fields';
