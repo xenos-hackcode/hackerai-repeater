@@ -177,7 +177,7 @@
             30% { opacity: 1; transform: translateY(-3px); }
         }
         .msg-row { display: flex; }
-        .msg-row.user { justify-content: flex-end; }
+        .msg-row.user { justify-content: flex-end; align-items: center; gap: 4px; }
         .msg-bubble {
             max-width: 85%;
             padding: 7px 11px;
@@ -186,6 +186,12 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+        .msg-edit-btn {
+            background: none; border: none; color: var(--fg-dim); cursor: pointer;
+            padding: 3px; display: flex; opacity: 0.55; flex-shrink: 0;
+        }
+        .msg-edit-btn .icon { width: 13px; height: 13px; }
+        .msg-edit-btn:hover { opacity: 1; color: var(--accent); }
         .msg-row.user .msg-bubble { background: var(--accent); color: #fff; }
         .msg-row.assistant .msg-bubble { background: var(--bg-panel); border: 1px solid var(--border); }
         .quick-reply-row { display: flex; gap: 6px; padding-left: 2px; }
@@ -837,7 +843,35 @@
             bubble.className = 'msg-bubble';
             bubble.textContent = entry.text;
             row.appendChild(bubble);
+            if (entry.kind === 'user' && entry.historyIndex != null) {
+                const editBtn = document.createElement('button');
+                editBtn.className = 'msg-edit-btn';
+                editBtn.title = 'Edit this message (discards everything after it in this task)';
+                editBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+                editBtn.addEventListener('click', () => editUserMessage(entry.id));
+                row.appendChild(editBtn);
+            }
             return row;
+        }
+        // Edit + regenerate: truncates both the visible log and the model's own history
+        // back to right before this message, then lets the user retype it. historyIndex
+        // is what makes the truncation point exact -- see where it's set in runChatTurn.
+        function editUserMessage(entryId) {
+            if (turnRunning) {
+                addChatEntry({ kind: 'note', text: 'Wait for the current step to finish before editing an earlier message.' });
+                return;
+            }
+            const idx = state.chatLog.findIndex(e => e.id === entryId);
+            if (idx === -1) return;
+            const entry = state.chatLog[idx];
+            if (entry.historyIndex == null) return;
+            state.chatLog = state.chatLog.slice(0, idx);
+            state.agentHistory = state.agentHistory.slice(0, entry.historyIndex);
+            saveState();
+            renderChatLog();
+            chatInput.value = entry.text;
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
         }
         // Looks for a short "X, Y, or Z?" style list at the end of a question (optionally
         // after a colon, e.g. "which project did you mean: casino, webrtc, or hackerai-repeater?").
@@ -1194,12 +1228,37 @@
             });
             tasksMenu.appendChild(compactItem);
 
+            const clearItem = document.createElement('div');
+            clearItem.className = 'command-item';
+            clearItem.innerHTML = '<span class="cmd-name">Clear this task</span><span class="cmd-desc">Wipe it -- not saved, unlike New task</span>';
+            clearItem.addEventListener('click', () => {
+                applyTaskSnapshot(blankTask());
+                saveState();
+                renderChatLog();
+                hideTasksMenu();
+            });
+            tasksMenu.appendChild(clearItem);
+
             state.sessions.forEach(s => {
                 const item = document.createElement('div');
                 item.className = 'command-item';
                 const when = new Date(s.savedAt).toLocaleString();
-                item.innerHTML = `<span class="cmd-name">${escapeHtml(s.title || 'Task')}</span><span class="cmd-desc">${escapeHtml(when)}</span>`;
                 item.addEventListener('click', () => switchToTask(s.id));
+                const info = document.createElement('div');
+                info.style.cssText = 'flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;';
+                info.innerHTML = `<span class="cmd-name">${escapeHtml(s.title || 'Task')}</span><span class="cmd-desc">${escapeHtml(when)}</span>`;
+                const delBtn = document.createElement('button');
+                delBtn.className = 'msg-edit-btn';
+                delBtn.title = 'Delete this saved task';
+                delBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>';
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    state.sessions = state.sessions.filter(x => x.id !== s.id);
+                    saveState();
+                    toggleTasksMenu(); toggleTasksMenu(); // cheap re-render: close then reopen
+                });
+                item.appendChild(info);
+                item.appendChild(delBtn);
                 tasksMenu.appendChild(item);
             });
             tasksMenu.hidden = false;
@@ -1378,9 +1437,9 @@
                     requestStop();
                     return;
                 }
-                addChatEntry({ kind: 'user', text: val });
+                const queuedEntry = addChatEntry({ kind: 'user', text: val });
                 addChatEntry({ kind: 'note', text: 'Sent — Xenos will pick this up as soon as it finishes its current step.' });
-                pendingInterjections.push(val);
+                pendingInterjections.push({ id: queuedEntry.id, text: val });
                 return;
             }
             if (state.mode === 'agent') runAgent(val); else runAsk(val);
@@ -1760,7 +1819,13 @@
             return { error: `Unknown tool ${call.name}` };
         }
         function logStep(text) { state.chatLog.push({ id: uid(), kind: 'step', text }); saveState(); renderChatLog(); }
-        function addChatEntry(entry) { state.chatLog.push(Object.assign({ id: uid() }, entry)); saveState(); renderChatLog(); }
+        function addChatEntry(entry) {
+            const full = Object.assign({ id: uid() }, entry);
+            state.chatLog.push(full);
+            saveState();
+            renderChatLog();
+            return full;
+        }
 
         // A model this small sometimes narrates a tool result loosely instead of staying
         // grounded in it -- e.g. reporting "already up to date" right after a push actually
@@ -1781,7 +1846,11 @@
         // Shared by Ask (file/terminal tools only) and Agent (everything) -- the only
         // difference between modes is which tools get offered, not this loop itself.
         async function runChatTurn(userText, tools) {
-            addChatEntry({ kind: 'user', text: userText });
+            // Recorded so a later edit of this exact message knows where to truncate
+            // agentHistory back to -- chatLog interleaves chips/notes/steps that have no
+            // agentHistory equivalent, so position in one array says nothing about position
+            // in the other; this index is the only reliable link between them.
+            addChatEntry({ kind: 'user', text: userText, historyIndex: state.agentHistory.length });
             state.agentHistory.push({ role: 'user', content: userText });
             setThinking(true);
             if (state.agentHistory.length > 24 || estimateHistoryChars() > 20000) await compactAgentHistory(true);
@@ -1801,11 +1870,13 @@
                 // handed to the model now, at this natural checkpoint between steps.
                 if (pendingInterjections.length) {
                     const extra = pendingInterjections.splice(0, pendingInterjections.length);
-                    extra.forEach(text => {
+                    extra.forEach(item => {
+                        const queuedEntry = state.chatLog.find(e => e.id === item.id);
+                        if (queuedEntry) queuedEntry.historyIndex = state.agentHistory.length;
                         state.agentHistory.push({
                             role: 'user',
                             content: `(New message from the user, sent while you were still working on the task above. ` +
-                                `Decide whether to address it right now or finish the current step first, then continue.)\n${text}`,
+                                `Decide whether to address it right now or finish the current step first, then continue.)\n${item.text}`,
                         });
                     });
                 }
