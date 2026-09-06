@@ -660,7 +660,9 @@
             'and the outcome, then a final line "Tools used: <comma-separated tool names actually called>". For example: "Report: Casino ' +
             'pushed to GitHub" / "Created the xenos-hackcode/casino repo and pushed the existing project to it -- main branch now has real ' +
             'content." / "Tools used: run_terminal_command". Skip this wrap-up for a plain conversational reply that involved no tool ' +
-            'calls -- just answer directly. Keep replies concise either way.';
+            'calls, and also skip it when your reply is itself a follow-up question (asking whether to continue, offering the next step, ' +
+            'or asking for a missing detail) -- a question just gets asked directly, never wrapped in a Report header. Keep replies ' +
+            'concise either way.';
 
         function loadState() {
             try {
