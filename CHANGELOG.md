@@ -2,6 +2,12 @@
 
 All notable changes to HackerAI Repeater, newest first.
 
+## 1.7.3
+- Added a one-time-per-task hint, well before auto-compaction kicks in, when
+  a task is getting long — with a real "New task" button attached (same
+  pattern as ChatGPT surfacing a direct action), not just text telling the
+  user to go find the menu themselves.
+
 ## 1.7.2
 - Confirm cards for every tool except `run_terminal_command`/`tor_fetch` now
   have Allow/Deny split buttons with a dropdown: once, for this session, or
