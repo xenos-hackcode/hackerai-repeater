@@ -1889,7 +1889,7 @@
                 setThinking(false);
                 state.agentHistory.push({ role: 'assistant', content: result.content || '' });
                 let finalText = result.content || '(no response)';
-                if (lastFailureDetail && !/\b(error|fail|not found|doesn't exist|does not exist|denied|stopped|timed?\s?out)\b/i.test(finalText)) {
+                if (lastFailureDetail && !/\b(error|fail\w*|not found|doesn't exist|does not exist|denied|stopped|timed?\s?out|unable to)\b/i.test(finalText)) {
                     finalText = `⚠ The last action actually reported an error (${lastFailureDetail}) that this reply doesn't mention -- double check before trusting it:\n\n${finalText}`;
                 }
                 addChatEntry({ kind: 'assistant', text: finalText });
