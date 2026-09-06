@@ -762,6 +762,10 @@
         // act on it immediately or finish the current step first.
         let turnRunning = false;
         let pendingInterjections = [];
+        // Directories confirmed not to exist this task, so a fresh user message ("create the
+        // repo for me") can't make the model blindly retry the exact same fabricated path a
+        // second time in a new turn -- cleared on New Task / switching tasks in applyTaskSnapshot.
+        let knownBadDirectories = new Set();
         // Hard stop: unlike an interjection (which the model reads and may or may not act
         // on), Stop halts the loop itself deterministically -- no more tool calls execute,
         // any pending confirm is auto-denied, and the in-flight LLM call / terminal command
@@ -1088,6 +1092,7 @@
             state.activeChipId.headers = snapshot.activeChipId.headers;
             state.activeChipId.body = snapshot.activeChipId.body;
             state.showOutput = snapshot.showOutput;
+            knownBadDirectories.clear();
         }
         function blankTask() {
             return {
@@ -1828,6 +1833,30 @@
                         logStep(`${call.name} -> ${JSON.stringify(toolResult).slice(0, 200)}`);
                         state.agentHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
                         lastFailureDetail = toolResultFailureDetail(toolResult);
+
+                        // "Directory does not exist" is an unambiguous, deterministic fact --
+                        // no need to wait for an exact repeat like the generic check below.
+                        // git init, then git add, then git push against the SAME bad directory
+                        // are three different calls that would never trip an identical-call
+                        // check, so this needs its own, keyed on the directory value alone.
+                        const dirMatch = toolResult && typeof toolResult.error === 'string'
+                            && /^Directory does not exist: (.+)$/.exec(toolResult.error);
+                        if (dirMatch) {
+                            const badDir = dirMatch[1];
+                            const alreadyKnownBad = knownBadDirectories.has(badDir);
+                            knownBadDirectories.add(badDir);
+                            state.agentHistory.push({
+                                role: 'user',
+                                content: alreadyKnownBad
+                                    ? `(The directory "${badDir}" was already confirmed not to exist earlier in this task, and you just ` +
+                                        `tried it again anyway. Stop using this directory -- ask the user for the real path instead of ` +
+                                        `guessing or retrying it.)`
+                                    : `(The directory "${badDir}" does not exist. Before trying any other command against it, stop and ` +
+                                        `either ask the user for the real path, or use list_directory on a directory you do know to look ` +
+                                        `for it -- do not guess another path or reuse this one.)`,
+                            });
+                            break; // don't let the rest of this batch fire more calls against the same bad directory
+                        }
 
                         // A model this small will sometimes retry the exact same failing call
                         // over and over (same tool, same arguments) instead of stopping to
